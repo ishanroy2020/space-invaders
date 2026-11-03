@@ -183,7 +183,7 @@
       <p class="badge" id="newBest">* NEW BEST *</p>
       <p class="small" id="waveReached"></p>
       <form id="saveForm" autocomplete="off">
-        <input id="nameInput" maxlength="8" placeholder="YOUR NAME" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done" aria-label="Your name">
+        <input id="nameInput" maxlength="8" placeholder="NAME" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done" aria-label="Your name">
         <button class="btn" type="submit">SAVE</button>
       </form>
       <p id="savedMsg"></p>
@@ -349,7 +349,8 @@ function layout() {
   if (cw <= 0 || ch <= 0) return;
   const aspect = cw / ch;
   let nW, nH;
-  if (aspect < 1) { nW = 480; nH = Math.round(clamp(480 / aspect, 600, 1040)); }
+  // Tall phones use a narrower play field so sprites render larger
+  if (aspect < 1) { nW = aspect < 0.6 ? 420 : 480; nH = Math.round(clamp(nW / aspect, 600, 1040)); }
   else { nH = 600; nW = Math.round(clamp(600 * aspect, 480, 1000)); }
   const scale = Math.min(cw / nW, ch / nH);
   const dispW = Math.floor(nW * scale), dispH = Math.floor(nH * scale);
@@ -417,7 +418,7 @@ function initAliens() {
   aliens = [];
   const cols = clamp(Math.floor((W - 120) / 42), 7, 12), rows = 5, gapX = 42, gapY = 34, cell = 33;
   const formW = (cols - 1) * gapX + cell;
-  const x0 = (W - formW) / 2, y0 = 96 + Math.min(level - 1, 6) * 14;
+  const x0 = (W - formW) / 2, y0 = 96 + Math.max(0, (H - 700) * 0.2) + Math.min(level - 1, 6) * 14;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const type = r === 0 ? 0 : r < 3 ? 1 : 2, sp = SPRITES[TYPES[type].a];
@@ -450,8 +451,18 @@ function onResize(oldW, oldH) {
     let minX = Infinity, maxX = -Infinity;
     for (const a of aliens) { minX = Math.min(minX, a.x); maxX = Math.max(maxX, a.x + a.w); }
     const fw = maxX - minX, avail = W - 24, k = fw > avail ? avail / fw : 1, nx0 = (W - fw * k) / 2;
-    const ky = (playerY() - 90) / Math.max(1, oldPY - 90);
-    for (const a of aliens) { a.x = nx0 + (a.x - minX) * k; a.y = 90 + (a.y - 90) * ky; }
+    // Move the whole formation (keeping row spacing) so it sits the same way relative to the new screen height
+    let minY = Infinity, maxY = -Infinity;
+    for (const a of aliens) if (a.alive) { minY = Math.min(minY, a.y); maxY = Math.max(maxY, a.y + a.h); }
+    let dy = 0;
+    if (minY < Infinity) {
+      const ky = (playerY() - 90) / Math.max(1, oldPY - 90);
+      dy = (90 + (minY - 90) * ky) - minY;
+      const limit = shieldY() - 10;
+      if (maxY + dy > limit) dy = limit - maxY;
+      if (minY + dy < 80) dy = 80 - minY;
+    }
+    for (const a of aliens) { a.x = nx0 + (a.x - minX) * k; a.y += dy; }
   }
   placeShields();
   pBullets.length = 0; aBullets.length = 0;
