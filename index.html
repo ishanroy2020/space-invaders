@@ -104,6 +104,22 @@
     border: 2px solid rgba(232,247,255,.45); touch-action: manipulation; cursor: pointer;
   }
   body[data-state="play"] #pauseBtn { display: block; }
+  [hidden] { display: none !important; }
+  #bombBtn {
+    position: absolute; right: 10px; bottom: 34%; z-index: 3; display: none;
+    min-width: 72px; height: 46px; padding: 0 10px; font: inherit; font-size: 11px; cursor: pointer;
+    color: var(--pink); background: rgba(255,43,214,.12); border: 3px solid var(--pink);
+    box-shadow: 0 0 16px rgba(255,43,214,.6); touch-action: manipulation;
+    animation: pulse .9s ease-in-out infinite alternate;
+  }
+  body[data-state="play"] #bombBtn.ready { display: block; }
+  @keyframes pulse { from { box-shadow: 0 0 6px rgba(255,43,214,.4); } to { box-shadow: 0 0 22px rgba(255,43,214,.9); } }
+  .btn.cont {
+    color: var(--bg); background: var(--yellow); border-color: var(--yellow); font-size: 12px;
+    box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--yellow), 0 0 26px rgba(255,230,0,.5);
+  }
+  .btn.cont:active { transform: scale(.97); }
+  #contNote { margin-top: -8px; }
 
   .kbd-only { display: none; }
   @media (hover: hover) and (pointer: fine) { .touch-only { display: none; } .kbd-only { display: block; } }
@@ -142,7 +158,7 @@
     #scoreList li { padding: 4px; font-size: 9px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .screen.show, .logo .l2, .blink { animation: none; }
+    .screen.show, .logo .l2, .blink, #bombBtn { animation: none; }
   }
 </style>
 </head>
@@ -152,6 +168,7 @@
     <canvas id="game" aria-label="Game screen"></canvas>
     <div id="crt"></div>
     <button id="pauseBtn" aria-label="Pause">II</button>
+    <button id="bombBtn" aria-label="Smart bomb">BOMB</button>
 
     <section id="menu" class="screen show">
       <h1 class="logo"><span class="l1">PIXEL</span><span class="l2">SIEGE</span></h1>
@@ -160,10 +177,11 @@
       <div class="row">
         <button class="btn" id="scoresBtn">SCORES</button>
         <button class="btn" id="soundBtn">SOUND ON</button>
+        <button class="btn touch-only" id="ctrlBtn">2 THUMBS</button>
       </div>
       <p class="best">BEST <span id="bestVal">0</span></p>
-      <p class="small touch-only">DRAG ANYWHERE TO MOVE<br>HOLD TO FIRE</p>
-      <p class="small kbd-only">ARROWS OR A/D TO MOVE<br>SPACE TO FIRE - P TO PAUSE</p>
+      <p class="small touch-only" id="howto"></p>
+      <p class="small kbd-only">ARROWS OR A/D MOVE - SPACE FIRE<br>B SMART BOMB - P PAUSE</p>
       <div class="legend" id="legend"></div>
       <p class="small" id="tip" hidden></p>
     </section>
@@ -173,6 +191,7 @@
       <button class="btn primary" id="resumeBtn">RESUME</button>
       <div class="row">
         <button class="btn" id="soundBtn2">SOUND ON</button>
+        <button class="btn touch-only" id="ctrlBtn2">2 THUMBS</button>
         <button class="btn" id="quitBtn">QUIT</button>
       </div>
     </section>
@@ -187,10 +206,12 @@
         <button class="btn" type="submit">SAVE</button>
       </form>
       <p id="savedMsg"></p>
+      <button class="btn cont" id="contBtn">CONTINUE WAVE <span id="contWave">1</span> (<span id="contSec">9</span>)</button>
+      <p class="small" id="contNote">KEEP YOUR WAVE - SCORE RESETS TO 0</p>
       <div class="row">
         <button class="btn primary" id="againBtn">PLAY AGAIN</button>
+        <button class="btn" id="menuBtn">MENU</button>
       </div>
-      <button class="btn" id="menuBtn">MENU</button>
     </section>
 
     <section id="scores" class="screen dim">
@@ -257,6 +278,7 @@ const SHIP_W = 11 * PIXEL, SHIP_H = 8 * PIXEL;
 const POWER = {
   rapid:  { label: 'RAPID',  letter: 'R', color: '#ffe600' },
   spread: { label: 'SPREAD', letter: 'S', color: '#ff2bd6' },
+  shield: { label: 'SHIELD', letter: 'O', color: '#00e5ff' },
   life:   { label: '1UP',    letter: '+', color: '#39ff14' },
 };
 
@@ -296,7 +318,10 @@ function spriteURL(name, color, px) {
 
 // ---------- sound (synthesised, no files) ----------
 const audio = {
-  ac: null, out: null, nb: null, on: store.get('sound', true), _u: 520,
+  ac: null, out: null, nb: null, _u: 520,
+  // 'all' = music + effects, 'sfx' = effects only, 'off'
+  mode: (m => ['all', 'sfx', 'off'].includes(m) ? m : 'all')(store.get('audioMode', store.get('sound', true) ? 'all' : 'off')),
+  get on() { return this.mode !== 'off'; },
   unlock() {
     if (!this.ac) {
       const AC = window.AudioContext || window.webkitAudioContext;
@@ -338,7 +363,102 @@ const audio = {
   wave()  { [262, 330, 392, 523].forEach((f, i) => this.tone(f, 0.12, { type: 'triangle', vol: 0.25, at: i * 0.09 })); },
   over()  { [392, 330, 262, 196].forEach((f, i) => this.tone(f, 0.22, { type: 'triangle', vol: 0.3, at: i * 0.18 })); },
   click() { this.tone(660, 0.05, { vol: 0.1 }); },
+  graze() { this.tone(1800, 0.035, { type: 'triangle', vol: 0.07 }); },
+  shieldPop() { this.tone(900, 0.18, { type: 'triangle', to: 200, vol: 0.25 }); },
+  powerDown() { this.tone(600, 0.28, { to: 140, vol: 0.2 }); },
+  oneUp() { [523, 784, 1047, 1568].forEach((f, i) => this.tone(f, 0.12, { type: 'triangle', vol: 0.25, at: i * 0.08 })); },
+  bomb()  { this.noise(1.1, { vol: 0.9, freq: 3000 }); this.tone(90, 0.9, { type: 'sawtooth', to: 30, vol: 0.35 }); },
+  ready() { [784, 1047].forEach((f, i) => this.tone(f, 0.1, { vol: 0.18, at: i * 0.1 })); },
 };
+
+// ---------- music: original chiptune, bouncy swung lead over a marching bass that speeds up as enemies fall ----------
+// Melody and bass are 8 bars of 8th notes (MIDI numbers, 0 = rest). Chords: C Am F G | F G Em Am
+const MEL = [
+  [67, 0, 72, 76, 0, 79, 0, 76],
+  [81, 0, 79, 76, 0, 72, 74, 0],
+  [77, 0, 81, 84, 0, 81, 77, 0],
+  [79, 0, 74, 71, 74, 79, 0, 0],
+  [77, 77, 0, 81, 0, 79, 77, 0],
+  [79, 0, 83, 0, 86, 0, 83, 79],
+  [76, 0, 79, 83, 0, 79, 76, 0],
+  [72, 0, 74, 76, 79, 0, 84, 0],
+];
+const BASS = [
+  [48, 43, 40, 43], [45, 40, 36, 40], [41, 36, 33, 36], [43, 38, 35, 38],
+  [41, 36, 33, 36], [43, 38, 35, 38], [40, 35, 31, 35], [45, 40, 36, 33],
+];
+const midiHz = n => 440 * Math.pow(2, (n - 69) / 12);
+const music = {
+  playing: false, step: 0, next: 0, timer: null, bpm: 112, bus: null, pulse: null,
+  wanted() { return audio.mode === 'all'; },
+  start() {
+    const ac = audio.ac;
+    if (!ac || this.playing || !this.wanted()) return;
+    if (!this.pulse) {
+      // 25% duty pulse wave: the classic 8-bit lead sound
+      const n = 32, re = new Float32Array(n), im = new Float32Array(n);
+      for (let k = 1; k < n; k++) re[k] = (2 / (k * Math.PI)) * Math.sin(k * Math.PI * 0.25);
+      this.pulse = ac.createPeriodicWave(re, im);
+    }
+    this.bus = ac.createGain();
+    this.bus.gain.value = 0.55;
+    this.bus.connect(audio.out);
+    this.playing = true; this.step = 0; this.next = ac.currentTime + 0.08;
+    this.timer = setInterval(() => this.tick(), 25);
+  },
+  stop() {
+    if (!this.playing) return;
+    this.playing = false;
+    clearInterval(this.timer); this.timer = null;
+    const bus = this.bus, ac = audio.ac;
+    if (bus && ac) { bus.gain.setTargetAtTime(0, ac.currentTime, 0.05); setTimeout(() => bus.disconnect(), 400); }
+    this.bus = null;
+  },
+  tick() {
+    const ac = audio.ac;
+    if (!ac || ac.state !== 'running' || !this.bus) return;
+    while (this.next < ac.currentTime + 0.12) {
+      const eighth = 60 / this.bpm / 2;
+      this.play(this.step, this.next, eighth);
+      this.next += eighth;
+      this.step = (this.step + 1) % 64;
+    }
+  },
+  voice(type, freq, t, dur, vol, slideTo) {
+    const ac = audio.ac, o = ac.createOscillator(), g = ac.createGain();
+    if (type === 'pulse') o.setPeriodicWave(this.pulse); else o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.005);
+    g.gain.setValueAtTime(vol, t + dur * 0.6);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.bus);
+    o.start(t); o.stop(t + dur + 0.02);
+  },
+  play(step, t, eighth) {
+    const bar = step >> 3, s = step & 7;
+    const tt = t + (s % 2 ? eighth * 0.16 : 0);           // swing the off-beats for a bouncy feel
+    const n = MEL[bar][s];
+    if (n) this.voice('pulse', midiHz(n), tt, eighth * 0.85, 0.11);
+    if (s % 2 === 0) this.voice('triangle', midiHz(BASS[bar][s / 2]), t, eighth * 1.7, 0.32);
+    if (s === 0 || s === 4) this.voice('sine', 150, t, 0.12, 0.35, 45);   // kick
+    if (s === 2 || s === 6) {                                                // snare-ish noise
+      const ac = audio.ac, src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+      src.buffer = audio.nb; f.type = 'highpass'; f.frequency.value = 1800;
+      g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+      src.connect(f); f.connect(g); g.connect(this.bus); src.start(t); src.stop(t + 0.1);
+    }
+  },
+};
+function syncMusic() {
+  if (state === 'play') {
+    const killed = total ? (total - aliveN) / total : 0;
+    music.bpm = 116 + killed * 70 + Math.min(level - 1, 5) * 4;   // the march speeds up like the invaders do
+  } else music.bpm = 104;
+  const want = music.wanted() && (state === 'play' || state === 'menu' || state === 'scores') && !document.hidden;
+  if (want) music.start(); else music.stop();
+}
 
 // ---------- layout: fill any screen (portrait, landscape, folded or unfolded) ----------
 let bgGrad = null;
@@ -382,11 +502,17 @@ let state = 'menu', time = 0;
 let score = 0, lives = 3, level = 1, combo = 0, best = store.get('best', 0), bestAtStart = 0;
 let player = null, aliens = [], total = 0, aliveN = 0, alienDir = 1, animT = 0, animFrame = 0;
 let pBullets = [], aBullets = [], shields = [], ufo = null, drops = [], booms = [], parts = [], texts = [];
-let bannerT = 0, shakeT = 0, flashT = 0, respawnT = 0, overT = 0, hintT = 0, shootCD = 0;
+let bannerT = 0, shakeT = 0, flashT = 0, flashCol = '255,51,85', respawnT = 0, overT = 0, hintT = 0, shootCD = 0;
 let powers = { rapid: 0, spread: 0 };
+// Forgiveness systems
+const LIFE_EVERY = 2000, COMBO_TIME = 3, BOMB_PER_KILL = 0.05;
+let nextLife = LIFE_EVERY, bomb = 0, ease = 0, waveT = 0, comboT = 0, deaths = [];
+const bombBtn = $('bombBtn');
 let keys = {};
 let stars = [];
-const pointer = { active: false, id: null, lastX: 0 };
+const pointer = { moveId: null, lastX: 0, fireIds: new Set(), touches: new Map() };
+let controls = store.get('controls', 'two');
+const isFiring = () => controls === 'two' ? pointer.fireIds.size > 0 : pointer.moveId !== null;
 const mult = () => Math.min(4, 1 + Math.floor(combo / 8));
 
 function initStars() {
@@ -396,21 +522,28 @@ function initStars() {
 }
 
 function newGame() {
-  score = 0; lives = 3; level = 1; combo = 0; bestAtStart = best;
+  level = 1;
+  resetRun();
+  hintT = store.get('tut', false) ? 0 : 6;
+  startWave();
+}
+
+// Shared by a new game and a continue: fresh score, lives and ship
+function resetRun() {
+  score = 0; lives = 3; combo = 0; comboT = 0; bestAtStart = best;
+  nextLife = LIFE_EVERY; bomb = 0; ease = 0; deaths = [];
   powers = { rapid: 0, spread: 0 };
   booms = []; parts = []; texts = [];
   shakeT = flashT = respawnT = overT = 0;
-  player = { x: W / 2 - SHIP_W / 2, y: playerY(), alive: true, inv: 0 };
+  player = { x: W / 2 - SHIP_W / 2, y: playerY(), alive: true, inv: 0, shield: false };
   player.tx = player.x;
-  hintT = store.get('tut', false) ? 0 : 6;
-  startWave();
 }
 
 function startWave() {
   initAliens();
   initShields();
   pBullets = []; aBullets = []; drops = []; ufo = null;
-  alienDir = 1; bannerT = 1.6;
+  alienDir = 1; bannerT = 1.6; waveT = 0;
   audio.wave();
 }
 
@@ -487,6 +620,16 @@ function update(dt) {
   shootCD -= dt;
   powers.rapid = Math.max(0, powers.rapid - dt);
   powers.spread = Math.max(0, powers.spread - dt);
+  ease = Math.max(0, ease - dt);
+  if (bannerT <= 0) waveT += dt;
+  // Combo drains over time instead of resetting on a missed shot
+  if (combo > 0 && (comboT -= dt) <= 0) combo = 0;
+  // Extra life every LIFE_EVERY points
+  if (score >= nextLife) {
+    nextLife += LIFE_EVERY;
+    if (lives < 5) { lives++; text(W / 2, shieldY() - 40, 'EXTRA LIFE!', '#39ff14', 14); audio.oneUp(); buzz(40); }
+  }
+  bombBtn.classList.toggle('ready', bomb >= 1);
 
   // Player
   if (player.alive) {
@@ -496,7 +639,7 @@ function update(dt) {
     if (dir) player.x = player.tx;
     else player.x += (player.tx - player.x) * Math.min(1, dt * 22);
     if (player.inv > 0) player.inv -= dt;
-    if (pointer.active || keys[' ']) fire();
+    if (isFiring() || keys[' ']) fire();
   } else if (lives > 0) {
     respawnT -= dt;
     if (respawnT <= 0) { player.alive = true; player.inv = 2; aBullets.length = 0; }
@@ -509,9 +652,9 @@ function update(dt) {
   for (let i = pBullets.length - 1; i >= 0; i--) {
     const b = pBullets[i];
     b.x += b.dx * dt; b.y += b.dy * dt;
-    if (b.y < 28 || b.x < -10 || b.x > W + 10) { pBullets.splice(i, 1); combo = 0; }
+    if (b.y < 28 || b.x < -10 || b.x > W + 10) pBullets.splice(i, 1);
   }
-  const abv = Math.min(420, 200 + level * 18);
+  const abv = Math.min(420, 200 + level * 18) * (ease > 0 ? 0.8 : 1);
   for (let i = aBullets.length - 1; i >= 0; i--) {
     const b = aBullets[i];
     b.y += abv * dt; b.t += dt;
@@ -520,6 +663,11 @@ function update(dt) {
 
   // Enemies
   if (bannerT <= 0) { moveAliens(dt); alienShoot(dt); spawnUfo(dt); }
+  // Aimed shots flash red first, then fire
+  for (const a of aliens) {
+    if (a.warn > 0 && (a.warn -= dt) <= 0 && a.alive && player.alive)
+      aBullets.push({ x: a.x + a.w / 2 - 4.5, y: a.y + a.h, t: 0 });
+  }
   animT += dt;
   if (animT > Math.max(0.12, 0.55 - (1 - aliveN / total) * 0.4)) { animT = 0; animFrame ^= 1; }
   if (ufo) {
@@ -560,18 +708,24 @@ function moveAliens(dt) {
   if (maxY >= player.y && lives > 0) invasion();
 }
 
+// Fire rate starts gentle at the beginning of each wave, then builds; eases off for a while after repeated deaths
+function pressure() { return (ease > 0 ? 0.6 : 1) * Math.min(1, 0.55 + waveT / 15); }
+
 function alienShoot(dt) {
-  const maxB = Math.min(6, 2 + Math.floor(level / 2));
-  if (aBullets.length >= maxB || Math.random() > (0.9 + level * 0.25) * dt) return;
+  const maxB = Math.max(1, Math.min(6, 2 + Math.floor(level / 2)) - (ease > 0 ? 1 : 0));
+  if (aBullets.length >= maxB || Math.random() > (0.9 + level * 0.25) * pressure() * dt) return;
   const bottoms = {};
   for (const a of aliens) if (a.alive && (!bottoms[a.col] || a.y > bottoms[a.col].y)) bottoms[a.col] = a;
   const list = Object.values(bottoms);
   if (!list.length) return;
-  let s;
   if (Math.random() < 0.4) {
+    // Aimed shot: telegraphed with a short red flash so it can be dodged
     const px = player.x + SHIP_W / 2;
-    s = list.reduce((m, a) => Math.abs(a.x + a.w / 2 - px) < Math.abs(m.x + m.w / 2 - px) ? a : m);
-  } else s = list[Math.floor(Math.random() * list.length)];
+    const s = list.reduce((m, a) => Math.abs(a.x + a.w / 2 - px) < Math.abs(m.x + m.w / 2 - px) ? a : m);
+    if (!(s.warn > 0)) s.warn = 0.4;
+    return;
+  }
+  const s = list[Math.floor(Math.random() * list.length)];
   aBullets.push({ x: s.x + s.w / 2 - 4.5, y: s.y + s.h, t: 0 });
 }
 
@@ -589,13 +743,23 @@ function collisions() {
       if (a.alive && hit(br, a)) { killAlien(a); pBullets.splice(i, 1); continue outer; }
     }
     if (ufo && hit(br, ufo)) { killUfo(); pBullets.splice(i, 1); continue; }
-    if (damageShield(br)) { pBullets.splice(i, 1); combo = 0; }
+    if (damageShield(br)) pBullets.splice(i, 1);
   }
+  // Only the ship's glowing core can be hit; bullets that pass close by "graze" for bonus points
+  const core = { x: player.x + SHIP_W / 2 - 5, y: player.y + 8, w: 10, h: 12 };
+  const zone = { x: player.x - 12, y: player.y - 14, w: SHIP_W + 24, h: SHIP_H + 22 };
   for (let i = aBullets.length - 1; i >= 0; i--) {
-    const b = aBullets[i], br = { x: b.x, y: b.y, w: 9, h: 18 };
-    if (damageShield(br)) { aBullets.splice(i, 1); continue; }
-    if (player.alive && player.inv <= 0 && hit(br, { x: player.x + 4, y: player.y + 6, w: SHIP_W - 8, h: SHIP_H - 6 })) {
-      aBullets.splice(i, 1); playerHit();
+    const b = aBullets[i], br = { x: b.x + 2, y: b.y + 2, w: 5, h: 14 };
+    if (damageShield({ x: b.x, y: b.y, w: 9, h: 18 })) { aBullets.splice(i, 1); continue; }
+    if (!player.alive) continue;
+    if (player.inv <= 0 && hit(br, core)) { aBullets.splice(i, 1); playerHit(); continue; }
+    if (!b.grazed && hit(br, zone)) {
+      b.grazed = true;
+      score += 10 * mult(); bumpBest();
+      bomb = Math.min(1, bomb + 0.02);
+      sparks(b.x + 4, b.y + 9, '#ffffff', 4, 80);
+      text(b.x + 4, b.y, 'GRAZE', '#e8f7ff', 7);
+      audio.graze();
     }
   }
   const sy = shieldY();
@@ -639,14 +803,44 @@ function eraseShield(s, a) {
   }
 }
 
-function killAlien(a) {
-  a.alive = false; aliveN--; combo++;
+function killAlien(a, byBomb) {
+  a.alive = false; a.warn = 0; aliveN--; combo++; comboT = COMBO_TIME;
   const m = mult(), t = TYPES[a.type];
   score += t.pts * m; bumpBest();
   boom(a.x + a.w / 2, a.y + a.h / 2, t.color, 1);
-  audio.kill();
+  if (!byBomb) audio.kill();
   if (m > 1 && combo % 8 === 0) text(a.x + a.w / 2, a.y, 'x' + m + ' COMBO', '#ff2bd6', 10);
-  if (Math.random() < 0.03) drop(a.x + a.w / 2, a.y);
+  if (Math.random() < 0.035) drop(a.x + a.w / 2, a.y);
+  if (!byBomb && bomb < 1) {
+    bomb = Math.min(1, bomb + BOMB_PER_KILL);
+    if (bomb >= 1) bombReady();
+  }
+}
+
+function bombReady() {
+  audio.ready();
+  text(W / 2, shieldY() - 40, 'BOMB READY!', '#ff2bd6', 12);
+  if (!store.get('bombTip', false)) {
+    text(W / 2, shieldY() - 22, finePointer ? 'PRESS B' : 'TAP THE BOMB BUTTON', '#ff2bd6', 8);
+    store.set('bombTip', true);
+  }
+}
+
+// Smart bomb: wipes every enemy bullet and blasts the front row of the formation
+function useBomb() {
+  if (state !== 'play' || bomb < 1 || !player || !player.alive) return;
+  bomb = 0;
+  for (const b of aBullets) sparks(b.x + 4, b.y + 9, '#ff3355', 3);
+  aBullets.length = 0;
+  const front = {};
+  for (const a of aliens) { a.warn = 0; if (a.alive && (!front[a.col] || a.y > front[a.col].y)) front[a.col] = a; }
+  for (const a of Object.values(front)) killAlien(a, true);
+  if (ufo) killUfo();
+  player.inv = Math.max(player.inv, 1);
+  flashT = 0.35; flashCol = '255,255,255'; shakeT = 0.4;
+  text(W / 2, H * 0.45, 'SMART BOMB!', '#ffffff', 16);
+  audio.bomb(); buzz([30, 30, 90]);
+  bombBtn.classList.remove('ready');
 }
 
 function killUfo() {
@@ -659,7 +853,7 @@ function killUfo() {
 }
 
 function drop(x, y) {
-  const r = Math.random(), type = r < 0.45 ? 'rapid' : r < 0.85 ? 'spread' : 'life';
+  const r = Math.random(), type = r < 0.35 ? 'rapid' : r < 0.65 ? 'spread' : r < 0.9 ? 'shield' : 'life';
   drops.push({ x: x - 10, y, w: 20, h: 20, type, t: 0 });
 }
 
@@ -667,23 +861,57 @@ function collect(d) {
   const p = POWER[d.type];
   if (d.type === 'life') {
     if (lives < 5) lives++; else { score += 500; bumpBest(); }
-  } else powers[d.type] = 9;
+  } else if (d.type === 'shield') player.shield = true;
+  else powers[d.type] = 9;
   text(player.x + SHIP_W / 2, player.y - 16, p.label + '!', p.color, 12);
   audio.power(); buzz(30);
 }
 
+// A hit costs the shield first, then your power-ups, and only then a life
 function playerHit() {
-  player.alive = false; lives--; combo = 0;
-  powers.rapid = powers.spread = 0;
+  const cx = player.x + SHIP_W / 2, cy = player.y + SHIP_H / 2;
+  if (player.shield) {
+    player.shield = false; player.inv = 1.2; shakeT = 0.2;
+    sparks(cx, cy, '#00e5ff', 26, 200);
+    text(cx, player.y - 16, 'SHIELD DOWN', '#00e5ff', 9);
+    audio.shieldPop(); buzz(40);
+    return;
+  }
+  if (powers.rapid > 0 || powers.spread > 0) {
+    powers.rapid = powers.spread = 0; player.inv = 1.2; shakeT = 0.25;
+    sparks(cx, cy, '#ffe600', 20, 180);
+    text(cx, player.y - 16, 'POWER LOST', '#ffe600', 9);
+    audio.powerDown(); buzz(50);
+    return;
+  }
+  loseLife();
+}
+
+function loseLife() {
+  player.alive = false; player.shield = false; lives = Math.max(0, lives - 1);
+  combo = 0; powers.rapid = powers.spread = 0;
+  for (const a of aliens) a.warn = 0;
   boom(player.x + SHIP_W / 2, player.y + SHIP_H / 2, '#39ff14', 2.2);
-  shakeT = 0.45; flashT = 0.25;
+  shakeT = 0.45; flashT = 0.25; flashCol = '255,51,85';
   audio.die(); buzz([60, 40, 120]);
+  // Two deaths close together: quietly ease off for 30 seconds
+  deaths.push(time);
+  deaths = deaths.filter(t => time - t < 45);
+  if (deaths.length >= 2) { ease = 30; deaths = []; }
   if (lives > 0) respawnT = 1.4; else overT = 1.3;
 }
 
+// Enemies reached the bottom: costs one life and the formation is pushed back to the top
 function invasion() {
-  lives = 1;
-  if (player.alive) playerHit(); else { lives = 0; overT = 1.3; }
+  let minY = Infinity;
+  for (const a of aliens) if (a.alive) minY = Math.min(minY, a.y);
+  const dy = Math.max(0, minY - 96);
+  for (const a of aliens) { a.y -= dy; a.warn = 0; }
+  aBullets.length = 0;
+  text(W / 2, shieldY() - 40, 'THEY BROKE THROUGH!', '#ff3355', 11);
+  initShields();
+  if (player.alive) loseLife();
+  else { lives = Math.max(0, lives - 1); if (!lives) overT = 1.3; }
 }
 
 function bumpBest() { if (score > best) best = score; }
@@ -776,7 +1004,8 @@ function drawWorld() {
   for (const a of aliens) {
     if (!a.alive) continue;
     const t = TYPES[a.type];
-    draw(animFrame ? t.b : t.a, a.x, a.y, t.color);
+    const color = a.warn > 0 ? (Math.floor(a.warn * 20) % 2 ? '#ffffff' : '#ff3355') : t.color;
+    draw(animFrame ? t.b : t.a, a.x, a.y, color);
   }
   if (ufo) draw('carrier', ufo.x, ufo.y, '#ff2bd6');
 
@@ -802,6 +1031,18 @@ function drawWorld() {
     ctx.fillStyle = Math.floor(time * 20) % 2 ? '#ffe600' : '#ff8a00';
     ctx.fillRect(fx, player.y + SHIP_H, 3, 3 + Math.random() * 4);
     draw('ship', player.x, player.y, '#39ff14');
+    // Glowing core = the only part that can be hit
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 6;
+    ctx.fillRect(player.x + SHIP_W / 2 - 2, player.y + 13, 4, 4);
+    ctx.shadowBlur = 0;
+  }
+  if (player && player.alive && player.shield) {
+    ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.55 + Math.sin(time * 6) * 0.25;
+    ctx.shadowColor = '#00e5ff'; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.arc(player.x + SHIP_W / 2, player.y + SHIP_H / 2, 26, 0, Math.PI * 2); ctx.stroke();
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
   }
 
   // Explosions and particles
@@ -831,7 +1072,18 @@ function drawHUD() {
   ctx.font = '14px ' + FONT; ctx.fillStyle = '#e8f7ff';
   ctx.fillText(pad(score), 12, 26);
   const m = mult();
-  if (m > 1) { ctx.font = '10px ' + FONT; ctx.fillStyle = '#ff2bd6'; ctx.fillText('x' + m, 104, 28); }
+  if (m > 1) {
+    ctx.font = '10px ' + FONT; ctx.fillStyle = '#ff2bd6'; ctx.fillText('x' + m, 104, 28);
+    ctx.fillRect(104, 41, 24 * clamp(comboT / COMBO_TIME, 0, 1), 2);   // combo timer
+  }
+  // Smart bomb meter
+  ctx.font = '7px ' + FONT; ctx.fillStyle = '#8a86b5';
+  ctx.fillText('BOMB', 12, 48);
+  ctx.strokeStyle = 'rgba(255,43,214,.6)'; ctx.lineWidth = 1;
+  ctx.strokeRect(46.5, 47.5, 60, 6);
+  const full = bomb >= 1;
+  ctx.fillStyle = full && Math.floor(time * 6) % 2 ? '#ffffff' : '#ff2bd6';
+  ctx.fillRect(48, 49, 57 * bomb, 3);
   ctx.textAlign = 'center';
   ctx.font = '8px ' + FONT; ctx.fillStyle = '#8a86b5';
   ctx.fillText('BEST', W / 2 + 24, 12);
@@ -869,6 +1121,34 @@ function drawBanner() {
   ctx.globalAlpha = 1;
 }
 
+function hintFinger(x, y, rgb, s = 1) {
+  ctx.strokeStyle = 'rgba(' + rgb + ',.85)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(x, y, 11 * s, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = 'rgba(' + rgb + ',.25)';
+  ctx.beginPath(); ctx.arc(x, y, 7 * s, 0, Math.PI * 2); ctx.fill();
+}
+
+// Two-thumb mode: faint split line, side labels, and a ring under each active thumb
+function drawTouchZones() {
+  if (controls !== 'two' || finePointer || !player) return;
+  const top = shieldY() + 40, gy = groundY();
+  ctx.strokeStyle = 'rgba(232,247,255,.10)'; ctx.lineWidth = 1;
+  ctx.setLineDash([4, 6]);
+  ctx.beginPath(); ctx.moveTo(W / 2 + 0.5, top); ctx.lineTo(W / 2 + 0.5, gy - 4); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.font = '7px ' + FONT;
+  ctx.fillStyle = pointer.moveId !== null ? 'rgba(232,247,255,.5)' : 'rgba(232,247,255,.18)';
+  ctx.fillText('< MOVE >', W * 0.25, gy - 10);
+  ctx.fillStyle = pointer.fireIds.size ? 'rgba(255,51,85,.7)' : 'rgba(255,51,85,.25)';
+  ctx.fillText('FIRE', W * 0.75, gy - 10);
+  for (const t of pointer.touches.values()) {
+    const rgb = t.kind === 'fire' ? '255,51,85' : '232,247,255';
+    ctx.globalAlpha = 0.5;
+    hintFinger(t.x, t.y, rgb, t.kind === 'fire' ? 1.6 + Math.sin(time * 20) * 0.15 : 1.6);
+    ctx.globalAlpha = 1;
+  }
+}
+
 function drawHint() {
   if (hintT <= 0 || !player) return;
   ctx.globalAlpha = Math.min(1, hintT);
@@ -877,15 +1157,19 @@ function drawHint() {
   if (finePointer) {
     glowText('ARROWS OR A/D TO MOVE', W / 2, y, '#e8f7ff', 9);
     glowText('SPACE TO FIRE', W / 2, y + 16, '#e8f7ff', 9);
+  } else if (controls === 'two') {
+    glowText('LEFT THUMB: DRAG TO MOVE', W / 2, y, '#e8f7ff', 8);
+    glowText('RIGHT THUMB: HOLD TO FIRE', W / 2, y + 16, '#ff3355', 8);
+    const fy = playerY() + SHIP_H / 2;
+    hintFinger(W * 0.25 + Math.sin(time * 2.4) * 40, fy, '232,247,255');
+    hintFinger(W * 0.75, fy, '255,51,85', 1 + Math.abs(Math.sin(time * 4)) * 0.4);
+    glowText('<', W * 0.25 - 64, fy, '#e8f7ff', 10);
+    glowText('>', W * 0.25 + 64, fy, '#e8f7ff', 10);
   } else {
     glowText('DRAG ANYWHERE TO MOVE', W / 2, y, '#e8f7ff', 9);
     glowText('HOLD TO FIRE', W / 2, y + 16, '#e8f7ff', 9);
-    // Animated "finger" showing the swipe
-    const fx = W / 2 + Math.sin(time * 2.4) * 70, fy = playerY() + SHIP_H + 4;
-    ctx.strokeStyle = 'rgba(232,247,255,.8)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(fx, fy, 11, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = 'rgba(232,247,255,.25)';
-    ctx.beginPath(); ctx.arc(fx, fy, 7, 0, Math.PI * 2); ctx.fill();
+    const fy = playerY() + SHIP_H + 4;
+    hintFinger(W / 2 + Math.sin(time * 2.4) * 70, fy, '232,247,255');
     glowText('<', W / 2 - 100, fy, '#e8f7ff', 10);
     glowText('>', W / 2 + 100, fy, '#e8f7ff', 10);
   }
@@ -901,8 +1185,9 @@ function render(dt) {
   ctx.restore();
   drawHUD();
   drawBanner();
+  drawTouchZones();
   drawHint();
-  if (flashT > 0) { ctx.fillStyle = 'rgba(255,51,85,' + (flashT * 1.2) + ')'; ctx.fillRect(0, 0, W, H); }
+  if (flashT > 0) { ctx.fillStyle = 'rgba(' + flashCol + ',' + Math.min(0.6, flashT * 1.2) + ')'; ctx.fillRect(0, 0, W, H); }
 }
 
 let last = performance.now();
@@ -913,6 +1198,7 @@ function frame(now) {
   if (state === 'play') { update(dt); updateFx(dt); }
   else if (state === 'over') updateFx(dt);
   render(dt);
+  syncMusic();
   requestAnimationFrame(frame);
 }
 
@@ -920,16 +1206,16 @@ function frame(now) {
 const screens = ['menu', 'pause', 'over', 'scores'];
 function showScreen(id) { for (const s of screens) $(s).classList.toggle('show', s === id); }
 function setState(s) { state = s; document.body.dataset.state = s; }
-function releaseInput() { pointer.active = false; pointer.id = null; keys = {}; }
+function releaseInput() { pointer.moveId = null; pointer.fireIds.clear(); pointer.touches.clear(); keys = {}; }
 
 function toMenu() {
-  setState('menu'); releaseInput();
+  setState('menu'); releaseInput(); stopCont();
   $('bestVal').textContent = best;
   showScreen('menu');
 }
 function startGame() {
   audio.unlock();
-  releaseInput();
+  releaseInput(); stopCont();
   newGame();
   setState('play');
   showScreen(null);
@@ -960,6 +1246,7 @@ function gameOver() {
   const over = $('over');
   over.classList.add('locked');          // stop a finger still on the screen from tapping PLAY AGAIN
   setTimeout(() => over.classList.remove('locked'), 800);
+  startContCountdown();
   showScreen('over');
 }
 
@@ -1009,12 +1296,54 @@ function showScores() {
   showScreen('scores');
 }
 function toggleSound() {
-  audio.on = !audio.on;
-  store.set('sound', audio.on);
+  audio.mode = { all: 'sfx', sfx: 'off', off: 'all' }[audio.mode];
+  store.set('audioMode', audio.mode);
   syncSound();
   audio.click();
 }
-function syncSound() { for (const id of ['soundBtn', 'soundBtn2']) $(id).textContent = audio.on ? 'SOUND ON' : 'SOUND OFF'; }
+function syncSound() {
+  const label = { all: 'MUSIC + SFX', sfx: 'SFX ONLY', off: 'SOUND OFF' }[audio.mode];
+  for (const id of ['soundBtn', 'soundBtn2']) $(id).textContent = label;
+}
+function toggleControls() {
+  controls = controls === 'two' ? 'one' : 'two';
+  store.set('controls', controls);
+  releaseInput();
+  syncControls();
+}
+function syncControls() {
+  for (const id of ['ctrlBtn', 'ctrlBtn2']) $(id).textContent = controls === 'two' ? '2 THUMBS' : '1 THUMB';
+  $('howto').innerHTML = controls === 'two'
+    ? 'LEFT THUMB: DRAG TO MOVE<br>RIGHT THUMB: HOLD TO FIRE'
+    : 'DRAG ANYWHERE TO MOVE<br>HOLD TO FIRE';
+}
+
+// Continue: keep the wave you reached, but the score starts again from 0
+let contTimer = null;
+function stopCont() { if (contTimer) { clearInterval(contTimer); contTimer = null; } }
+function startContCountdown() {
+  stopCont();
+  let sec = 9;
+  $('contWave').textContent = level;
+  $('contSec').textContent = sec;
+  $('contBtn').hidden = false; $('contNote').hidden = false;
+  contTimer = setInterval(() => {
+    if (document.activeElement === $('nameInput') || state !== 'over') return;   // don't run out while typing a name
+    sec--;
+    $('contSec').textContent = sec;
+    if (sec <= 0) { stopCont(); $('contBtn').hidden = true; $('contNote').hidden = true; }
+  }, 1000);
+}
+function continueGame() {
+  if (state !== 'over') return;
+  stopCont(); releaseInput();
+  resetRun();
+  bomb = 0.5; ease = 30;          // a little help to get back on your feet
+  player.inv = 2;
+  startWave();
+  setState('play');
+  showScreen(null);
+}
 
 const on = (id, fn) => $(id).addEventListener('click', e => { audio.unlock(); e.currentTarget.blur(); audio.click(); fn(); });
 on('playBtn', startGame);
@@ -1027,6 +1356,10 @@ on('againBtn', startGame);
 on('menuBtn', toMenu);
 on('backBtn', toMenu);
 on('pauseBtn', pauseGame);
+on('ctrlBtn', toggleControls);
+on('ctrlBtn2', toggleControls);
+on('contBtn', continueGame);
+bombBtn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); audio.unlock(); useBomb(); });
 $('saveForm').addEventListener('submit', saveScore);
 $('nameInput').addEventListener('blur', () => window.scrollTo(0, 0));
 
@@ -1035,20 +1368,42 @@ function logicalX(e) {
   const r = canvas.getBoundingClientRect();
   return (e.clientX - r.left) / r.width * W;
 }
+function logicalY(e) {
+  const r = canvas.getBoundingClientRect();
+  return (e.clientY - r.top) / r.height * H;
+}
+// Two thumbs (default): a touch that starts on the left half steers, a touch on the right half fires while held.
+// One thumb: drag anywhere to steer and auto-fire while touching.
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
   audio.unlock();
-  if (state !== 'play' || pointer.active) return;
-  pointer.active = true; pointer.id = e.pointerId; pointer.lastX = logicalX(e);
+  if (state !== 'play') return;
+  const x = logicalX(e), y = logicalY(e);
+  const twoThumb = controls === 'two';
+  if (!twoThumb || x < W / 2) {
+    if (pointer.moveId !== null) return;
+    pointer.moveId = e.pointerId; pointer.lastX = x;
+    pointer.touches.set(e.pointerId, { x, y, kind: 'move' });
+  } else {
+    pointer.fireIds.add(e.pointerId);
+    pointer.touches.set(e.pointerId, { x, y, kind: 'fire' });
+  }
   try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
 });
 canvas.addEventListener('pointermove', e => {
-  if (!pointer.active || e.pointerId !== pointer.id || !player) return;
-  const x = logicalX(e);
-  player.tx = clamp(player.tx + (x - pointer.lastX) * DRAG_GAIN, 8, W - 8 - SHIP_W);
-  pointer.lastX = x;
+  const t = pointer.touches.get(e.pointerId);
+  if (!t) return;
+  t.x = logicalX(e); t.y = logicalY(e);
+  if (e.pointerId !== pointer.moveId || !player) return;
+  const gain = controls === 'two' ? DRAG_GAIN * 1.35 : DRAG_GAIN;   // half-screen thumb still crosses the whole field
+  player.tx = clamp(player.tx + (t.x - pointer.lastX) * gain, 8, W - 8 - SHIP_W);
+  pointer.lastX = t.x;
 });
-const release = e => { if (e.pointerId === pointer.id) { pointer.active = false; pointer.id = null; } };
+const release = e => {
+  if (e.pointerId === pointer.moveId) pointer.moveId = null;
+  pointer.fireIds.delete(e.pointerId);
+  pointer.touches.delete(e.pointerId);
+};
 for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(t, release);
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('gesturestart', e => e.preventDefault());
@@ -1065,6 +1420,8 @@ addEventListener('keydown', e => {
   keys[k] = true;
   if (state === 'menu' && (k === ' ' || k === 'enter')) startGame();
   else if (state === 'play' && (k === 'p' || k === 'escape')) pauseGame();
+  else if (state === 'play' && k === 'b') useBomb();
+  else if (state === 'over' && k === 'c' && !$('contBtn').hidden && !$('over').classList.contains('locked')) continueGame();
   else if (state === 'paused' && ['p', 'escape', ' ', 'enter'].includes(k)) resumeGame();
   else if (state === 'scores' && ['escape', ' ', 'enter'].includes(k)) toMenu();
   else if (state === 'over' && k === ' ' && !$('over').classList.contains('locked')) startGame();
@@ -1090,6 +1447,7 @@ const tip = $('tip');
 if (isWeChat) { tip.textContent = 'TIP: TAP ... THEN OPEN IN BROWSER'; tip.hidden = false; }
 else if (isIOS && !isStandalone) { tip.textContent = 'TIP: SHARE > ADD TO HOME SCREEN FOR FULL SCREEN'; tip.hidden = false; }
 syncSound();
+syncControls();
 $('bestVal').textContent = best;
 layout();
 if (document.fonts && document.fonts.load) document.fonts.load('12px "Press Start 2P"').catch(() => {});
