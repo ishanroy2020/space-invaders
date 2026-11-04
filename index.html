@@ -50,8 +50,7 @@
   #crt {
     position: absolute; inset: 0; pointer-events: none; z-index: 2;
     background:
-      repeating-linear-gradient(to bottom, rgba(255,255,255,.015) 0 1px, rgba(0,0,0,.13) 1px 3px),
-      radial-gradient(ellipse at center, transparent 58%, rgba(0,0,0,.6) 100%);
+      radial-gradient(ellipse at center, transparent 62%, rgba(0,0,0,.5) 100%);
   }
 
   .screen {
@@ -303,7 +302,46 @@ const POWER = {
   life:   { label: '1UP',    letter: '+', color: '#39ff14' },
 };
 
-// Sprites are pre-rendered once (with a neon glow) at the screen's real pixel density.
+// HD pixel art: every sprite is refined to double resolution with the Scale2x (EPX) algorithm,
+// which smooths diagonal edges, then pre-rendered once at the screen's real pixel density with
+// top-light / bottom-shadow shading and a tight neon glow.
+function scale2x(g) {
+  const h = g.length, w = g[0].length, o = Array.from({ length: h * 2 }, () => new Array(w * 2).fill(0));
+  const at = (r, c) => (r < 0 || c < 0 || r >= h || c >= w) ? 0 : g[r][c];
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+    const P = at(r, c), A = at(r - 1, c), B = at(r, c + 1), C = at(r, c - 1), D = at(r + 1, c);
+    o[2 * r][2 * c]         = (C === A && C !== D && A !== B) ? A : P;
+    o[2 * r][2 * c + 1]     = (A === B && A !== C && B !== D) ? B : P;
+    o[2 * r + 1][2 * c]     = (D === C && D !== B && C !== A) ? C : P;
+    o[2 * r + 1][2 * c + 1] = (B === D && B !== A && D !== C) ? D : P;
+  }
+  return o;
+}
+const HD = {};
+for (const k in SPRITES) HD[k] = scale2x(SPRITES[k]);
+const SH = PIXEL / 2;   // size of one HD cell in logical px
+
+function rgbOf(hex) {
+  const h = hex.length === 4 ? hex.slice(1).split('').map(x => x + x).join('') : hex.slice(1);
+  return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16));
+}
+const mixRGB = (c, t, k) => 'rgb(' + c.map((v, i) => Math.round(v + (t[i] - v) * k)).join(',') + ')';
+function shades(hex) {
+  const c = rgbOf(hex);
+  return { base: mixRGB(c, c, 0), light: mixRGB(c, [255, 255, 255], 0.45), dark: mixRGB(c, [0, 0, 0], 0.32) };
+}
+// Paint a 0/1 grid with shading into context g at offset (ox, oy), k device px per cell
+function paintGrid(g, grid, ox, oy, k, sh) {
+  const rows = grid.length, cols = grid[0].length;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (!grid[r][c]) continue;
+    const up = r > 0 && grid[r - 1][c], down = r < rows - 1 && grid[r + 1][c], right = c < cols - 1 && grid[r][c + 1];
+    g.fillStyle = !up ? sh.light : (!down || !right) ? sh.dark : sh.base;
+    const x0 = Math.round(ox + c * k), y0 = Math.round(oy + r * k);
+    g.fillRect(x0, y0, Math.round(ox + (c + 1) * k) - x0, Math.round(oy + (r + 1) * k) - y0);
+  }
+}
+
 let W = 480, H = 800, renderScale = 1;
 const GLOW = 5;
 const cache = new Map();
@@ -311,16 +349,20 @@ function spriteCanvas(name, color, scale, glow) {
   const key = name + '|' + color + '|' + scale + '|' + glow;
   let c = cache.get(key);
   if (c) return c;
-  const sp = SPRITES[name], k = scale * renderScale, p = glow ? Math.ceil(GLOW * renderScale) : 0;
+  const sp = HD[name], k = scale / 2 * renderScale, p = glow ? Math.ceil(GLOW * renderScale) : 0;
   c = document.createElement('canvas');
   c.width = Math.ceil(sp[0].length * k) + p * 2;
   c.height = Math.ceil(sp.length * k) + p * 2;
   const g = c.getContext('2d');
-  g.fillStyle = color;
-  if (glow) { g.shadowColor = color; g.shadowBlur = 4 * renderScale; }
-  for (let r = 0; r < sp.length; r++)
-    for (let q = 0; q < sp[r].length; q++)
-      if (sp[r][q]) g.fillRect(p + Math.floor(q * k), p + Math.floor(r * k), Math.ceil(k), Math.ceil(k));
+  if (glow) {
+    // Soft glow pass underneath, then the crisp shaded pixels on top
+    g.shadowColor = color; g.shadowBlur = 5 * renderScale; g.fillStyle = color;
+    g.globalAlpha = 0.85;
+    for (let r = 0; r < sp.length; r++) for (let q = 0; q < sp[r].length; q++)
+      if (sp[r][q]) g.fillRect(p + Math.round(q * k), p + Math.round(r * k), Math.ceil(k), Math.ceil(k));
+    g.shadowBlur = 0; g.globalAlpha = 1;
+  }
+  paintGrid(g, sp, p, p, k, shades(color));
   c.padL = p / renderScale;
   cache.set(key, c);
   return c;
@@ -330,11 +372,10 @@ function draw(name, x, y, color, scale = PIXEL, glow = true) {
   ctx.drawImage(c, Math.round((x - c.padL) * rs) / rs, Math.round((y - c.padL) * rs) / rs, c.width / rs, c.height / rs);
 }
 function spriteURL(name, color, px) {
-  const sp = SPRITES[name], d = Math.min(window.devicePixelRatio || 1, 3), c = document.createElement('canvas');
-  c.width = sp[0].length * px * d; c.height = sp.length * px * d;
-  const g = c.getContext('2d'); g.fillStyle = color;
-  sp.forEach((row, r) => row.forEach((v, q) => v && g.fillRect(q * px * d, r * px * d, px * d, px * d)));
-  return { url: c.toDataURL(), w: sp[0].length * px, h: sp.length * px };
+  const sp = HD[name], d = Math.min(window.devicePixelRatio || 1, 3), k = px / 2 * d, c = document.createElement('canvas');
+  c.width = Math.ceil(sp[0].length * k); c.height = Math.ceil(sp.length * k);
+  paintGrid(c.getContext('2d'), sp, 0, 0, k, shades(color));
+  return { url: c.toDataURL(), w: sp[0].length * px / 2, h: sp.length * px / 2 };
 }
 
 // ---------- sound (synthesised, no files) ----------
@@ -575,16 +616,17 @@ function noiseGen(seed) {
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16);
 const newCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 
-// Nebula texture that tiles seamlessly top-to-bottom, so it can scroll forever
+// Soft, painterly nebula (smoothly scaled up behind the crisp sprites) that tiles seamlessly top-to-bottom
 function makeNebula(sec, seed) {
-  const cell = 4, w = Math.ceil(W * 1.1 / cell), h = Math.ceil(H / cell);
+  const cell = 6, w = Math.ceil(W * 1.1 / cell), h = Math.ceil(H / cell);
   const c = newCanvas(w, h), g = c.getContext('2d'), img = g.createImageData(w, h), d = img.data;
-  const f = noiseGen(seed), [ca, cb] = sec.neb, k = sec.bright ? 1.1 : 0.85;
+  const f = noiseGen(seed), [ca, cb] = sec.neb, k = sec.bright ? 1.15 : 0.9;
+  const sc = cell / 4;                                  // keep cloud size independent of the cell size
   const field = (x, y) => {
-    const nx = x / 40, ny = y / 40;
+    const nx = x * sc / 40, ny = y * sc / 40;
     const warp = f(nx * 0.7 + 10, ny * 0.7 + 3, 3);
-    let v = clamp((f(nx + warp * 1.8, ny + warp * 1.8, 5) - 0.42) / 0.38, 0, 1);
-    v *= 1 - clamp((f(nx * 2.2 + 40, ny * 2.2, 3) - 0.55) * 3, 0, 1) * 0.8;   // dark dust lanes
+    let v = clamp((f(nx + warp * 1.8, ny + warp * 1.8, 5) - 0.4) / 0.4, 0, 1);
+    v *= 1 - clamp((f(nx * 2.2 + 40, ny * 2.2, 3) - 0.55) * 3, 0, 1) * 0.75;   // dark dust lanes
     return [v, f(nx * 0.5 + 77, ny * 0.5 + 9, 3)];
   };
   for (let y = 0; y < h; y++) {
@@ -592,13 +634,12 @@ function makeNebula(sec, seed) {
     for (let x = 0; x < w; x++) {
       const A = field(x, y), B = field(x, y - h);
       const v = A[0] * (1 - t) + B[0] * t, mRaw = A[1] * (1 - t) + B[1] * t;
-      const lv = Math.floor(v * 5 + BAYER[(y & 3) * 4 + (x & 3)] - 0.5) / 5;
-      if (lv <= 0) continue;
-      // Sharpen the colour mix so the two hues stay vivid instead of averaging to grey
-      const m = clamp((mRaw - 0.38) / 0.24, 0, 1), br = 0.55 + lv * 0.9, i = (y * w + x) * 4;
-      const hot = lv >= 0.8 ? 0.3 : 0;
+      if (v <= 0.01) continue;
+      const m = clamp((mRaw - 0.38) / 0.24, 0, 1), i = (y * w + x) * 4;
+      const hot = Math.max(0, v - 0.7) * 1.2;          // bright cores glow toward white
+      const br = 0.6 + v * 0.8;
       for (let ch = 0; ch < 3; ch++) d[i + ch] = ((ca[ch] + (cb[ch] - ca[ch]) * m) * br) * (1 - hot) + 255 * hot;
-      d[i + 3] = Math.min(255, lv * k * 150);
+      d[i + 3] = Math.min(255, Math.pow(v, 1.3) * k * 190);
     }
   }
   g.putImageData(img, 0, 0);
@@ -641,8 +682,10 @@ function drawSpace(dt) {
   const par = !bd.menu && player ? (player.x + SHIP_W / 2 - W / 2) * -0.02 : 0;
   if (!reduceMotion) scrollY = (scrollY + NEBULA_SPEED * dt) % H;
   const nx = -W * 0.05 + par, nw = W * 1.1;
-  ctx.drawImage(bd.neb, nx, scrollY - H, nw, H);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bd.neb, nx, scrollY - H, nw, H + 1);
   ctx.drawImage(bd.neb, nx, scrollY, nw, H);
+  ctx.imageSmoothingEnabled = false;
   for (const st of bd.spikes) {
     if (!reduceMotion) { st.y += GLINT_SPEED * dt; if (st.y > H + 20) { st.y = -20; st.x = rand(0, W); } }
     spikeStar(st.x + par * 0.5, st.y, st.s * (0.85 + Math.sin(time * 2 + st.p) * 0.15), st.c, 0.75);
@@ -690,6 +733,7 @@ function layout() {
   const oldW = W, oldH = H;
   W = nW; H = nH;
   cache.clear(); bgGrad = null;
+  for (const sh of shields) sh.cv = null;
   initStars();
   onResize(oldW, oldH);
 }
@@ -773,7 +817,7 @@ function initAliens() {
 function initShields() {
   const n = W >= 760 ? 5 : 4;
   shields = [];
-  for (let i = 0; i < n; i++) shields.push({ grid: SPRITES.barrier.map(r => r.slice()), x: 0, y: 0, w: 16 * PIXEL, h: 8 * PIXEL });
+  for (let i = 0; i < n; i++) shields.push({ grid: HD.barrier.map(r => r.slice()), x: 0, y: 0, w: 16 * PIXEL, h: 8 * PIXEL, cv: null });
   placeShields();
 }
 function placeShields() {
@@ -984,18 +1028,20 @@ function damageShield(br) {
   for (const s of shields) {
     if (!hit(br, s)) continue;
     const cols = s.grid[0].length, rows = s.grid.length;
-    const c0 = Math.max(0, Math.floor((br.x - s.x) / PIXEL)), c1 = Math.min(cols - 1, Math.floor((br.x + br.w - 0.01 - s.x) / PIXEL));
-    const r0 = Math.max(0, Math.floor((br.y - s.y) / PIXEL)), r1 = Math.min(rows - 1, Math.floor((br.y + br.h - 0.01 - s.y) / PIXEL));
+    const c0 = Math.max(0, Math.floor((br.x - s.x) / SH)), c1 = Math.min(cols - 1, Math.floor((br.x + br.w - 0.01 - s.x) / SH));
+    const r0 = Math.max(0, Math.floor((br.y - s.y) / SH)), r1 = Math.min(rows - 1, Math.floor((br.y + br.h - 0.01 - s.y) / SH));
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {
         if (!s.grid[r][c]) continue;
-        for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) {
+        // Ragged crater, same physical size as before but with twice the detail
+        for (let dr = -4; dr <= 4; dr++) for (let dc = -4; dc <= 4; dc++) {
           const rr = r + dr, cc = c + dc;
           if (rr < 0 || cc < 0 || rr >= rows || cc >= cols) continue;
           const d = dr * dr + dc * dc;
-          if (d === 0 || (d <= 4 && Math.random() < 0.75)) s.grid[rr][cc] = 0;
+          if (d <= 2 || (d <= 16 && Math.random() < 0.7 - d * 0.02)) s.grid[rr][cc] = 0;
         }
-        sparks(s.x + c * PIXEL, s.y + r * PIXEL, '#39ff14', 3);
+        s.cv = null;
+        sparks(s.x + c * SH, s.y + r * SH, '#39ff14', 4);
         return true;
       }
     }
@@ -1005,9 +1051,19 @@ function damageShield(br) {
 
 function eraseShield(s, a) {
   for (let r = 0; r < s.grid.length; r++) for (let c = 0; c < s.grid[r].length; c++) {
-    const px = s.x + c * PIXEL, py = s.y + r * PIXEL;
-    if (px < a.x + a.w && px + PIXEL > a.x && py < a.y + a.h && py + PIXEL > a.y) s.grid[r][c] = 0;
+    const px = s.x + c * SH, py = s.y + r * SH;
+    if (px < a.x + a.w && px + SH > a.x && py < a.y + a.h && py + SH > a.y && s.grid[r][c]) { s.grid[r][c] = 0; s.cv = null; }
   }
+}
+
+function drawShield(s) {
+  const rs = renderScale;
+  if (!s.cv) {
+    s.cv = document.createElement('canvas');
+    s.cv.width = Math.ceil(s.w * rs); s.cv.height = Math.ceil(s.h * rs);
+    paintGrid(s.cv.getContext('2d'), s.grid, 0, 0, SH * rs, shades('#39ff14'));
+  }
+  ctx.drawImage(s.cv, Math.round(s.x * rs) / rs, Math.round(s.y * rs) / rs, s.cv.width / rs, s.cv.height / rs);
 }
 
 function killAlien(a, byBomb) {
@@ -1180,13 +1236,7 @@ function glowText(str, x, y, color, size, align = 'center') {
 
 function drawWorld() {
   // Barriers
-  ctx.fillStyle = '#39ff14';
-  ctx.globalAlpha = 0.9;
-  for (const s of shields)
-    for (let r = 0; r < s.grid.length; r++)
-      for (let c = 0; c < s.grid[r].length; c++)
-        if (s.grid[r][c]) ctx.fillRect(s.x + c * PIXEL, s.y + r * PIXEL, PIXEL + 0.05, PIXEL + 0.05);
-  ctx.globalAlpha = 1;
+  for (const s of shields) drawShield(s);
 
   // Invaders
   for (const a of aliens) {
@@ -1210,14 +1260,22 @@ function drawWorld() {
   }
 
   // Bullets
-  for (const b of pBullets) draw('laser', b.x, b.y, '#bff');
+  ctx.globalCompositeOperation = 'lighter';
+  for (const b of pBullets) {
+    draw('laser', b.x, b.y, '#55eeff');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(b.x + 0.75, b.y + 1, 1.5, 10);    // white-hot core
+  }
   for (const b of aBullets) draw(Math.floor(b.t * 8) % 2 ? 'boltA' : 'boltB', b.x, b.y, '#ff3355');
+  ctx.globalCompositeOperation = 'source-over';
 
   // Player
   if (player && player.alive && !(player.inv > 0 && Math.floor(player.inv * 12) % 2)) {
-    const fx = player.x + SHIP_W / 2 - 1.5;
-    ctx.fillStyle = Math.floor(time * 20) % 2 ? '#ffe600' : '#ff8a00';
-    ctx.fillRect(fx, player.y + SHIP_H, 3, 3 + Math.random() * 4);
+    // Engine plume: flickering additive glow
+    const fx = player.x + SHIP_W / 2, fy = player.y + SHIP_H;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = 'rgba(255,140,0,.55)'; ctx.fillRect(fx - 2.25, fy, 4.5, 3 + Math.random() * 5);
+    ctx.fillStyle = 'rgba(255,240,150,.9)'; ctx.fillRect(fx - 0.75, fy, 1.5, 2 + Math.random() * 4);
+    ctx.globalCompositeOperation = 'source-over';
     draw('ship', player.x, player.y, '#39ff14');
     // Glowing core = the only part that can be hit
     ctx.fillStyle = '#ffffff';
@@ -1233,7 +1291,8 @@ function drawWorld() {
     ctx.shadowBlur = 0; ctx.globalAlpha = 1;
   }
 
-  // Explosions and particles
+  // Explosions and particles (additive, so overlapping light blooms brighter)
+  ctx.globalCompositeOperation = 'lighter';
   for (const b of booms) {
     ctx.globalAlpha = 1 - b.t / 0.32;
     const sc = PIXEL * b.size;
@@ -1245,6 +1304,7 @@ function drawWorld() {
     ctx.fillRect(p.x, p.y, p.s, p.s);
   }
   ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
   for (const t of texts) {
     ctx.globalAlpha = clamp(t.life * 1.5, 0, 1);
     glowText(t.str, t.x, t.y, t.color, t.size);
