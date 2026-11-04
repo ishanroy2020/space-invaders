@@ -50,7 +50,7 @@
   #crt {
     position: absolute; inset: 0; pointer-events: none; z-index: 2;
     background:
-      repeating-linear-gradient(to bottom, rgba(255,255,255,.02) 0 1px, rgba(0,0,0,.2) 1px 3px),
+      repeating-linear-gradient(to bottom, rgba(255,255,255,.015) 0 1px, rgba(0,0,0,.13) 1px 3px),
       radial-gradient(ellipse at center, transparent 58%, rgba(0,0,0,.6) 100%);
   }
 
@@ -60,7 +60,21 @@
     gap: 18px; padding: 24px 16px; text-align: center;
   }
   .screen.show { display: flex; animation: pop .22s steps(4) both; }
-  .screen.dim { background: rgba(5,1,15,.8); }
+  .screen.dim { background: rgba(4,1,12,.45); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); }
+  /* Sci-fi glass panel with chamfered corners and corner brackets */
+  .panel {
+    position: relative; display: flex; flex-direction: column; align-items: center; gap: 16px;
+    width: min(440px, 100%); padding: 28px 20px;
+    background: linear-gradient(180deg, rgba(16,28,60,.82), rgba(6,4,22,.9));
+    border: 1px solid rgba(0,229,255,.35);
+    box-shadow: inset 0 0 40px rgba(0,229,255,.08), 0 0 40px rgba(0,0,0,.5);
+    clip-path: polygon(16px 0, calc(100% - 16px) 0, 100% 16px, 100% calc(100% - 16px), calc(100% - 16px) 100%, 16px 100%, 0 calc(100% - 16px), 0 16px);
+  }
+  .panel::before, .panel::after { content: ''; position: absolute; width: 22px; height: 22px; border: 2px solid var(--cyan); pointer-events: none; }
+  .panel::before { top: 7px; left: 7px; border-right: 0; border-bottom: 0; }
+  .panel::after { bottom: 7px; right: 7px; border-left: 0; border-top: 0; }
+  .logo, .tag, .best, #menu .small { text-shadow: 0 2px 6px rgba(0,0,0,.9), 0 0 2px #000; }
+  .logo span { text-shadow: 0 0 6px currentColor, 0 0 26px currentColor, 4px 4px 0 #3b0a66, 0 4px 14px #000; }
   @keyframes pop { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
 
   h2 { font-size: clamp(18px, 6vw, 28px); font-weight: normal; color: var(--cyan); text-shadow: 0 0 8px currentColor, 0 0 22px currentColor; line-height: 1.3; }
@@ -148,6 +162,7 @@
   /* Short screens: phones held sideways */
   @media (max-height: 520px) {
     .screen { gap: 10px; padding: 12px 16px; }
+    .panel { gap: 8px; padding: 14px 16px; }
     .logo { flex-direction: row; gap: 18px; }
     .logo span { font-size: 30px; }
     .legend, .tag, #tip { display: none; }
@@ -172,7 +187,7 @@
 
     <section id="menu" class="screen show">
       <h1 class="logo"><span class="l1">PIXEL</span><span class="l2">SIEGE</span></h1>
-      <p class="tag">HOLD THE LINE</p>
+      <p class="tag">DEFEND THE SOLAR SYSTEM</p>
       <button class="btn primary" id="playBtn">PLAY</button>
       <div class="row">
         <button class="btn" id="scoresBtn">SCORES</button>
@@ -187,6 +202,7 @@
     </section>
 
     <section id="pause" class="screen dim">
+      <div class="panel">
       <h2>PAUSED</h2>
       <button class="btn primary" id="resumeBtn">RESUME</button>
       <div class="row">
@@ -194,9 +210,11 @@
         <button class="btn touch-only" id="ctrlBtn2">2 THUMBS</button>
         <button class="btn" id="quitBtn">QUIT</button>
       </div>
+      </div>
     </section>
 
     <section id="over" class="screen dim">
+      <div class="panel">
       <h2 class="red">GAME OVER</h2>
       <p class="score-big" id="finalScore">0</p>
       <p class="badge" id="newBest">* NEW BEST *</p>
@@ -212,12 +230,15 @@
         <button class="btn primary" id="againBtn">PLAY AGAIN</button>
         <button class="btn" id="menuBtn">MENU</button>
       </div>
+      </div>
     </section>
 
     <section id="scores" class="screen dim">
+      <div class="panel">
       <h2>HIGH SCORES</h2>
       <ol id="scoreList"></ol>
       <button class="btn" id="backBtn">BACK</button>
+      </div>
     </section>
   </div>
 </div>
@@ -371,9 +392,10 @@ const audio = {
   ready() { [784, 1047].forEach((f, i) => this.tone(f, 0.1, { vol: 0.18, at: i * 0.1 })); },
 };
 
-// ---------- music: original chiptune, bouncy swung lead over a marching bass that speeds up as enemies fall ----------
-// Melody and bass are 8 bars of 8th notes (MIDI numbers, 0 = rest). Chords: C Am F G | F G Em Am
-const MEL = [
+// ---------- music: original chiptune song (verse / chorus / harmonised verse) ----------
+// Bouncy swung lead and octave-hopping bass in the verse, a marching bass in the chorus,
+// fast 8-bit chord arpeggios, drum fills, a key change per sector, and a tempo that rises as enemies fall.
+const MEL_A = [
   [67, 0, 72, 76, 0, 79, 0, 76],
   [81, 0, 79, 76, 0, 72, 74, 0],
   [77, 0, 81, 84, 0, 81, 77, 0],
@@ -383,22 +405,45 @@ const MEL = [
   [76, 0, 79, 83, 0, 79, 76, 0],
   [72, 0, 74, 76, 79, 0, 84, 0],
 ];
-const BASS = [
-  [48, 43, 40, 43], [45, 40, 36, 40], [41, 36, 33, 36], [43, 38, 35, 38],
-  [41, 36, 33, 36], [43, 38, 35, 38], [40, 35, 31, 35], [45, 40, 36, 33],
+const MEL_B = [
+  [74, 0, 77, 0, 81, 0, 77, 74],
+  [79, 0, 0, 83, 0, 79, 74, 0],
+  [76, 79, 84, 0, 79, 76, 72, 0],
+  [81, 0, 0, 76, 0, 72, 69, 0],
+  [77, 0, 81, 0, 86, 0, 84, 81],
+  [83, 0, 79, 0, 74, 0, 79, 83],
+  [84, 0, 0, 0, 79, 0, 76, 79],
+  [74, 0, 77, 79, 83, 0, 86, 0],
 ];
+const CHORD = { C: [48, 4], Dm: [50, 3], Em: [52, 3], F: [53, 4], G: [55, 4], Am: [57, 3] };
+const SONG = [
+  { chords: ['C', 'Am', 'F', 'G', 'F', 'G', 'Em', 'Am'], mel: MEL_A, bass: 'bounce', arp: false, harm: false },
+  { chords: ['Dm', 'G', 'C', 'Am', 'Dm', 'G', 'C', 'G'], mel: MEL_B, bass: 'march', arp: true, harm: false },
+  { chords: ['C', 'Am', 'F', 'G', 'F', 'G', 'Em', 'Am'], mel: MEL_A, bass: 'bounce', arp: true, harm: true },
+];
+const SCALE = [0, 2, 4, 5, 7, 9, 11];
+// Diatonic third below (C major) for the harmony voice
+function thirdBelow(n) {
+  const pc = n % 12, oct = Math.floor(n / 12), i = SCALE.indexOf(pc);
+  if (i < 0) return n - 3;
+  const j = i - 2;
+  return j >= 0 ? oct * 12 + SCALE[j] : (oct - 1) * 12 + SCALE[j + 7];
+}
 const midiHz = n => 440 * Math.pow(2, (n - 69) / 12);
 const music = {
-  playing: false, step: 0, next: 0, timer: null, bpm: 112, bus: null, pulse: null,
+  playing: false, step: 0, next: 0, timer: null, bpm: 112, bus: null, waves: null, transpose: 0, danger: false,
   wanted() { return audio.mode === 'all'; },
   start() {
     const ac = audio.ac;
     if (!ac || this.playing || !this.wanted()) return;
-    if (!this.pulse) {
-      // 25% duty pulse wave: the classic 8-bit lead sound
-      const n = 32, re = new Float32Array(n), im = new Float32Array(n);
-      for (let k = 1; k < n; k++) re[k] = (2 / (k * Math.PI)) * Math.sin(k * Math.PI * 0.25);
-      this.pulse = ac.createPeriodicWave(re, im);
+    if (!this.waves) {
+      // Pulse waves at 25% and 12.5% duty: the classic 8-bit lead and arpeggio tones
+      const mk = duty => {
+        const n = 32, re = new Float32Array(n), im = new Float32Array(n);
+        for (let k = 1; k < n; k++) re[k] = (2 / (k * Math.PI)) * Math.sin(k * Math.PI * duty);
+        return ac.createPeriodicWave(re, im);
+      };
+      this.waves = { p25: mk(0.25), p12: mk(0.125) };
     }
     this.bus = ac.createGain();
     this.bus.gain.value = 0.55;
@@ -418,15 +463,15 @@ const music = {
     const ac = audio.ac;
     if (!ac || ac.state !== 'running' || !this.bus) return;
     while (this.next < ac.currentTime + 0.12) {
-      const eighth = 60 / this.bpm / 2;
-      this.play(this.step, this.next, eighth);
-      this.next += eighth;
-      this.step = (this.step + 1) % 64;
+      const s16 = 60 / this.bpm / 4;
+      this.play(this.step, this.next, s16);
+      this.next += s16;
+      this.step = (this.step + 1) % (SONG.length * 8 * 16);
     }
   },
   voice(type, freq, t, dur, vol, slideTo) {
     const ac = audio.ac, o = ac.createOscillator(), g = ac.createGain();
-    if (type === 'pulse') o.setPeriodicWave(this.pulse); else o.type = type;
+    if (type === 'p25' || type === 'p12') o.setPeriodicWave(this.waves[type]); else o.type = type;
     o.frequency.setValueAtTime(freq, t);
     if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
     g.gain.setValueAtTime(0.0001, t);
@@ -436,32 +481,299 @@ const music = {
     o.connect(g); g.connect(this.bus);
     o.start(t); o.stop(t + dur + 0.02);
   },
-  play(step, t, eighth) {
-    const bar = step >> 3, s = step & 7;
-    const tt = t + (s % 2 ? eighth * 0.16 : 0);           // swing the off-beats for a bouncy feel
-    const n = MEL[bar][s];
-    if (n) this.voice('pulse', midiHz(n), tt, eighth * 0.85, 0.11);
-    if (s % 2 === 0) this.voice('triangle', midiHz(BASS[bar][s / 2]), t, eighth * 1.7, 0.32);
-    if (s === 0 || s === 4) this.voice('sine', 150, t, 0.12, 0.35, 45);   // kick
-    if (s === 2 || s === 6) {                                                // snare-ish noise
-      const ac = audio.ac, src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
-      src.buffer = audio.nb; f.type = 'highpass'; f.frequency.value = 1800;
-      g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
-      src.connect(f); f.connect(g); g.connect(this.bus); src.start(t); src.stop(t + 0.1);
+  noiseHit(t, dur, vol, hp) {
+    const ac = audio.ac, src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    src.buffer = audio.nb; f.type = 'highpass'; f.frequency.value = hp;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(f); f.connect(g); g.connect(this.bus);
+    src.start(t, Math.random() * 0.3); src.stop(t + dur + 0.01);
+  },
+  play(step, t, s16) {
+    const bar = Math.floor(step / 16), sec = SONG[Math.floor(bar / 8)], b = bar % 8, s = step % 16;
+    const tr = this.transpose;
+    const [root, third] = CHORD[sec.chords[b]];
+    const tri = [root, root + third, root + 7];
+    const tt = t + (s % 4 === 2 ? s16 * 0.33 : 0);          // shuffle feel on the off-beat 8ths
+
+    // Lead (8th-note grid); notes ring longer into rests
+    if (s % 2 === 0) {
+      const i = s / 2, n = sec.mel[b][i];
+      if (n) {
+        const len = (i < 7 && !sec.mel[b][i + 1]) ? 2 : 1;
+        const dur = len * 2 * s16 * 0.9;
+        this.voice('p25', midiHz(n + tr), tt, dur, 0.1);
+        if (sec.harm) this.voice('p12', midiHz(thirdBelow(n) + tr), tt, dur, 0.045);
+      }
     }
+    // Fast chord arpeggio
+    if (sec.arp) this.voice('p12', midiHz(tri[s % 3] + 24 + tr), t, s16 * 0.8, 0.03);
+    // Bass
+    if (sec.bass === 'bounce') {
+      if (s % 4 === 0) this.voice('triangle', midiHz(root - 12 + tr), t, s16 * 1.8, 0.3);
+      if (s % 4 === 2) this.voice('triangle', midiHz(root + tr), tt, s16 * 1.6, 0.26);
+    } else if (s % 4 === 0) {
+      const march = [tri[0], tri[2] - 12, tri[1] - 12, tri[0] - 12][s / 4];
+      this.voice('triangle', midiHz(march + tr), t, s16 * 3.2, 0.32);
+    }
+    // Drums, with a snare fill at the end of each 8-bar section
+    const fill = b === 7 && s >= 12;
+    if (s === 0 || s === 8 || (sec.arp && s === 10)) this.voice('sine', 150, t, 0.12, 0.35, 45);
+    if (s === 4 || s === 12 || fill) this.noiseHit(t, 0.09, fill ? 0.08 + (s - 12) * 0.02 : 0.12, 1800);
+    if (sec.arp ? true : s % 2 === 0) this.noiseHit(t, 0.03, s % 4 === 0 ? 0.035 : 0.02, 7000);
+    // Danger layer when only a few enemies remain
+    if (this.danger && s % 2 === 1) this.voice('p12', midiHz(tri[2] + 36 + tr), t, s16 * 0.6, 0.025);
   },
 };
 function syncMusic() {
-  if (state === 'play') {
+  if (state === 'play' || state === 'paused') {
     const killed = total ? (total - aliveN) / total : 0;
     music.bpm = 116 + killed * 70 + Math.min(level - 1, 5) * 4;   // the march speeds up like the invaders do
-  } else music.bpm = 104;
+    music.transpose = SECTORS[sectorIdx()].key;
+    music.danger = aliveN > 0 && aliveN <= 6;
+  } else { music.bpm = 104; music.transpose = 0; music.danger = false; }
   const want = music.wanted() && (state === 'play' || state === 'menu' || state === 'scores') && !document.hidden;
   if (want) music.start(); else music.stop();
 }
 
+// ---------- modern space backdrop: procedural pixel-art nebulae, planets and star glints ----------
+const SECTORS = [
+  { name: 'EARTH ORBIT',   planet: 'earth',   neb: [[30, 60, 170], [120, 40, 170]], key: 0 },
+  { name: 'THE MOON',      planet: 'moon',    neb: [[20, 90, 130], [70, 40, 140]],  key: 2 },
+  { name: 'MARS',          planet: 'mars',    neb: [[170, 60, 40], [110, 30, 100]], key: -3 },
+  { name: 'ASTEROID BELT', planet: null,      neb: [[110, 80, 60], [60, 40, 110]],  key: 5, rocks: true },
+  { name: 'JUPITER',       planet: 'jupiter', neb: [[200, 110, 50], [30, 120, 150]], key: 0 },
+  { name: 'SATURN',        planet: 'saturn',  neb: [[190, 150, 70], [90, 50, 150]], key: 2 },
+  { name: 'NEPTUNE',       planet: 'neptune', neb: [[30, 90, 200], [20, 160, 170]], key: -2 },
+  { name: 'DEEP NEBULA',   planet: null,      neb: [[230, 120, 60], [40, 150, 180]], key: 3, bright: true },
+];
+const sectorIdx = () => (level - 1) % SECTORS.length;
+
+function rng(seed) {
+  return () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function noiseGen(seed) {
+  const r = rng(seed), v = new Float32Array(256 * 256);
+  for (let i = 0; i < v.length; i++) v[i] = r();
+  const at = (x, y) => v[(y & 255) * 256 + (x & 255)];
+  const sm = t => t * t * (3 - 2 * t);
+  const n = (x, y) => {
+    const ix = Math.floor(x), iy = Math.floor(y), fx = sm(x - ix), fy = sm(y - iy);
+    const a = at(ix, iy), b = at(ix + 1, iy), c = at(ix, iy + 1), d = at(ix + 1, iy + 1);
+    return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+  };
+  return (x, y, oct = 4) => {
+    let s = 0, amp = 0.5, f = 1, norm = 0;
+    for (let o = 0; o < oct; o++) { s += amp * n(x * f, y * f); norm += amp; amp *= 0.5; f *= 2; }
+    return s / norm;
+  };
+}
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16);
+const newCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+function makeNebula(sec, seed) {
+  const cell = 4, w = Math.ceil(W * 1.1 / cell), h = Math.ceil(H * 1.06 / cell);
+  const c = newCanvas(w, h), g = c.getContext('2d'), img = g.createImageData(w, h), d = img.data;
+  const f = noiseGen(seed), [ca, cb] = sec.neb, k = sec.bright ? 1.1 : 0.85;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const nx = x / 40, ny = y / 40;
+    const warp = f(nx * 0.7 + 10, ny * 0.7 + 3, 3);
+    let v = clamp((f(nx + warp * 1.8, ny + warp * 1.8, 5) - 0.42) / 0.38, 0, 1);
+    v *= 1 - clamp((f(nx * 2.2 + 40, ny * 2.2, 3) - 0.55) * 3, 0, 1) * 0.8;   // dark dust lanes
+    const lv = Math.floor(v * 5 + BAYER[(y & 3) * 4 + (x & 3)] - 0.5) / 5;    // dithered to 5 levels
+    if (lv <= 0) continue;
+    // Sharpen the colour mix so the two hues stay vivid instead of averaging to grey
+    const m = clamp((f(nx * 0.5 + 77, ny * 0.5 + 9, 3) - 0.38) / 0.24, 0, 1), br = 0.55 + lv * 0.9, i = (y * w + x) * 4;
+    const hot = lv >= 0.8 ? 0.3 : 0;                                         // bright cores glow toward white
+    for (let ch = 0; ch < 3; ch++) d[i + ch] = ((ca[ch] + (cb[ch] - ca[ch]) * m) * br) * (1 - hot) + 255 * hot;
+    d[i + 3] = Math.min(255, lv * k * 150);
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+function surface(type, lon, lat, f) {
+  if (type === 'earth') {
+    let col = f(lon * 1.3 + 3, lat * 1.6 + 1, 5) > 0.53 ? (f(lon * 3 + 9, lat * 3, 3) > 0.5 ? [80, 140, 70] : [160, 140, 90]) : [30, 80, 185];
+    if (Math.abs(lat) > 1.22) col = [235, 240, 250];
+    if (f(lon * 2.2 + 20, lat * 3 + 5, 4) > 0.58) col = [240, 245, 255];
+    return col;
+  }
+  if (type === 'moon') {
+    const cr = f(lon * 5 + 30, lat * 5, 3);
+    let col = f(lon * 1.5, lat * 1.5, 4) < 0.42 ? [115, 115, 125] : [175, 175, 180];
+    if (cr > 0.66) col = [135, 135, 145];
+    if (cr > 0.72) col = [205, 205, 210];
+    return col;
+  }
+  if (type === 'mars') {
+    const n = f(lon * 1.6, lat * 1.6, 5);
+    if (lat < -1.25) return [240, 235, 235];
+    return n > 0.56 ? [130, 55, 40] : n < 0.4 ? [210, 110, 70] : [185, 85, 50];
+  }
+  if (type === 'jupiter') {
+    const sx = (lon - 0.5) / 0.32, sy = (lat - 0.38) / 0.16;
+    if (sx * sx + sy * sy < 1) return [195, 85, 60];
+    const b = Math.sin(lat * 10 + f(lon * 2, lat * 6, 3) * 2.2);
+    return b > 0.4 ? [230, 205, 170] : b > -0.3 ? [200, 150, 105] : [150, 100, 70];
+  }
+  if (type === 'saturn') return Math.sin(lat * 8 + f(lon * 2, lat * 5, 2) * 1.5) > 0 ? [225, 200, 150] : [195, 165, 115];
+  // neptune
+  const sx = (lon + 0.3) / 0.25, sy = (lat - 0.3) / 0.12;
+  if (sx * sx + sy * sy < 1) return [25, 45, 120];
+  return Math.sin(lat * 7 + f(lon * 2, lat * 4, 3) * 2) > 0.5 ? [90, 140, 235] : [45, 85, 200];
+}
+
+// Lit, dithered pixel sphere (cell = 3 logical px), with atmosphere glow and Saturn's rings
+function makePlanet(type, r, seed) {
+  const R = r / 3, atm = Math.max(2, Math.round(R * 0.08)), ringW = type === 'saturn' ? 2.3 : 1;
+  const cw = Math.ceil(R * 2 * ringW + atm * 2 + 2), ch = Math.ceil(R * 2 + atm * 2 + 2);
+  const c = newCanvas(cw, ch), g = c.getContext('2d'), img = g.createImageData(cw, ch), d = img.data;
+  const cx = cw / 2, cy = ch / 2, f = noiseGen(seed), L = [-0.55, -0.45, 0.7];
+  const atmCol = type === 'mars' ? [255, 150, 110] : (type === 'jupiter' || type === 'saturn') ? [255, 220, 170] : [110, 190, 255];
+  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+    const dx = (x + 0.5 - cx) / R, dy = (y + 0.5 - cy) / R, d2 = dx * dx + dy * dy;
+    const bay = BAYER[(y & 3) * 4 + (x & 3)];
+    let col = null, alpha = 255;
+    if (d2 <= 1) {
+      const nz = Math.sqrt(1 - d2);
+      const light = dx * L[0] + dy * L[1] + nz * L[2];
+      const shade = Math.floor(clamp(light * 1.15 + 0.1, 0, 1) * 5 + bay - 0.4) / 5;
+      const s = 0.06 + Math.max(0, shade) * 0.98;
+      const base = surface(type, Math.atan2(dx, nz), Math.asin(clamp(dy, -1, 1)), f);
+      col = [base[0] * s, base[1] * s, base[2] * s];
+    } else if (type !== 'moon' && d2 < Math.pow(1 + atm / R, 2)) {
+      const t = 1 - (Math.sqrt(d2) - 1) / (atm / R);
+      const a = t * clamp(0.25 + (-dx * 0.55 - dy * 0.45), 0, 1);
+      if (a > 0.05) { col = atmCol; alpha = Math.round(a * 220); }
+    }
+    if (type === 'saturn') {
+      const rr = Math.sqrt(dx * dx + Math.pow(dy / 0.26, 2));
+      if (rr > 1.3 && rr < 2.15 && !(rr > 1.72 && rr < 1.78) && (d2 > 1 || dy > 0)) {
+        const band = Math.sin(rr * 22) * 0.5 + 0.5, lr = clamp(0.55 - dx * 0.3, 0.3, 1) * (0.75 + band * 0.25);
+        col = [210 * lr, 185 * lr, 140 * lr]; alpha = 235;
+      }
+    }
+    if (!col) continue;
+    const i = (y * cw + x) * 4;
+    d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = alpha;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+function makeRock(seed, size) {
+  const c = newCanvas(size, size), g = c.getContext('2d'), img = g.createImageData(size, size), d = img.data;
+  const f = noiseGen(seed), h = size / 2;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const dx = (x + 0.5 - h) / h, dy = (y + 0.5 - h) / h;
+    if (Math.sqrt(dx * dx + dy * dy) > 0.65 + f(x * 0.5, y * 0.5, 2) * 0.45) continue;
+    const s = clamp(0.55 - dx * 0.35 - dy * 0.35, 0.15, 1), i = (y * size + x) * 4;
+    d[i] = 140 * s; d[i + 1] = 118 * s; d[i + 2] = 100 * s; d[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+let backdrop = null, meteors = [];
+function ensureBackdrop() {
+  const menu = state === 'menu' || state === 'scores' || !player;
+  const idx = menu ? -1 : sectorIdx();
+  const key = idx + '|' + W + '|' + H;
+  if (backdrop && backdrop.key === key) return backdrop;
+  const sec = menu ? { neb: [[40, 50, 160], [140, 40, 160]] } : SECTORS[idx];
+  const seed = 1234 + (idx + 1) * 977, r = rng(seed + 5);
+  const b = { key, menu, neb: makeNebula(sec, seed), spikes: [], rocks: [], planet: null };
+  for (let i = 0; i < 6; i++) b.spikes.push({ x: r() * W, y: r() * H * 0.8, s: 5 + r() * 9, c: ['#ffffff', '#ffe9c4', '#cfe6ff'][i % 3], p: r() * 6 });
+  if (menu) {
+    const R = W * 0.8;
+    b.planet = { c: makePlanet('earth', R, 42), x: W / 2, y: H + R * 0.62, R };
+  } else if (sec.planet) {
+    const R = Math.min(W, H) * (sec.planet === 'saturn' ? 0.15 : 0.19);
+    b.planet = { c: makePlanet(sec.planet, R, seed), x: W * (r() < 0.5 ? 0.16 : 0.84), y: H * 0.46, R };
+  }
+  if (sec.rocks) for (let i = 0; i < 9; i++) b.rocks.push({ c: makeRock(seed + i * 31, 5 + Math.floor(r() * 7)), x: r() * W, y: r() * H, v: 6 + r() * 14 });
+  backdrop = b;
+  return b;
+}
+
+function spikeStar(x, y, s, color, a) {
+  ctx.globalAlpha = a;
+  ctx.strokeStyle = color; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const ang of [Math.PI / 2, Math.PI / 6, -Math.PI / 6]) {       // six long diffraction spikes
+    const dx = Math.cos(ang) * s, dy = Math.sin(ang) * s;
+    ctx.moveTo(x - dx, y - dy); ctx.lineTo(x + dx, y + dy);
+  }
+  ctx.moveTo(x - s * 0.45, y); ctx.lineTo(x + s * 0.45, y);          // short horizontal pair
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+  ctx.globalAlpha = 1;
+}
+
+function drawSpace(dt) {
+  const bd = ensureBackdrop();
+  const par = !bd.menu && player ? (player.x + SHIP_W / 2 - W / 2) * -0.03 : Math.sin(time * 0.15) * 6;
+  ctx.drawImage(bd.neb, -W * 0.05 + par, -H * 0.03, W * 1.1, H * 1.06);
+  for (const st of bd.spikes) spikeStar(st.x + par * 0.5, st.y, st.s * (0.85 + Math.sin(time * 2 + st.p) * 0.15), st.c, 0.75);
+  for (const rk of bd.rocks) {
+    rk.y += rk.v * dt;
+    if (rk.y > H + 40) { rk.y = -40; rk.x = rand(0, W); }
+    ctx.globalAlpha = 0.8;
+    ctx.drawImage(rk.c, rk.x + par * 1.5, rk.y, rk.c.width * 3, rk.c.height * 3);
+    ctx.globalAlpha = 1;
+  }
+  const p = bd.planet;
+  if (p) {
+    const drift = bd.menu ? 0 : Math.min(60, waveT * 1.2);
+    const w = p.c.width * 3, h = p.c.height * 3;
+    ctx.globalAlpha = bd.menu ? 1 : 0.85;
+    ctx.drawImage(p.c, p.x - w / 2 + par * 1.6, p.y - h / 2 + drift, w, h);
+    ctx.globalAlpha = 1;
+    if (bd.menu) {
+      // Sunrise over Earth's limb
+      const sx = p.x - p.R * 0.5, sy = p.y - p.R * 0.865;
+      ctx.globalCompositeOperation = 'lighter';
+      const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, 90);
+      glow.addColorStop(0, 'rgba(255,255,255,.95)');
+      glow.addColorStop(0.15, 'rgba(255,220,160,.55)');
+      glow.addColorStop(1, 'rgba(255,140,60,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(sx - 90, sy - 90, 180, 180);
+      const streak = ctx.createLinearGradient(sx - 220, 0, sx + 220, 0);
+      streak.addColorStop(0, 'rgba(255,200,140,0)');
+      streak.addColorStop(0.5, 'rgba(255,230,200,.7)');
+      streak.addColorStop(1, 'rgba(255,200,140,0)');
+      ctx.fillStyle = streak;
+      ctx.fillRect(sx - 220, sy - 1, 440, 2);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+  // Shooting stars
+  if (Math.random() < dt / 3.5) {
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    meteors.push({ x: rand(0, W), y: rand(0, H * 0.5), vx: dir * rand(160, 280), vy: rand(80, 160), life: 0.8 });
+  }
+  for (let i = meteors.length - 1; i >= 0; i--) {
+    const m = meteors[i];
+    m.x += m.vx * dt; m.y += m.vy * dt; m.life -= dt;
+    if (m.life <= 0) { meteors.splice(i, 1); continue; }
+    const tx = m.x - m.vx * 0.12, ty = m.y - m.vy * 0.12;
+    const gr = ctx.createLinearGradient(m.x, m.y, tx, ty);
+    gr.addColorStop(0, 'rgba(255,255,255,' + Math.min(1, m.life * 1.5) + ')');
+    gr.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = gr; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(tx, ty); ctx.stroke();
+  }
+}
+
 // ---------- layout: fill any screen (portrait, landscape, folded or unfolded) ----------
-let bgGrad = null;
+let bgGrad = null, hudGrad = null;
 function layout() {
   const cs = getComputedStyle(app);
   const cw = app.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
@@ -521,8 +833,10 @@ function initStars() {
   for (let i = 0; i < n; i++) stars.push({ x: rand(0, W), y: rand(0, H), z: Math.random() });
 }
 
+// Developer shortcut for testing: ?dev&wave=5 starts at wave 5
+const DEV_WAVE = (() => { const q = new URLSearchParams(location.search); return q.has('dev') ? clamp(parseInt(q.get('wave'), 10) || 1, 1, 99) : 1; })();
 function newGame() {
-  level = 1;
+  level = DEV_WAVE;
   resetRun();
   hintT = store.get('tut', false) ? 0 : 6;
   startWave();
@@ -543,7 +857,7 @@ function startWave() {
   initAliens();
   initShields();
   pBullets = []; aBullets = []; drops = []; ufo = null;
-  alienDir = 1; bannerT = 1.6; waveT = 0;
+  alienDir = 1; bannerT = 2.2; waveT = 0;
   audio.wave();
 }
 
@@ -948,37 +1262,18 @@ function updateFx(dt) {
 
 // ---------- rendering ----------
 function drawBackground(dt) {
-  ctx.fillStyle = '#05010f';
+  ctx.fillStyle = '#04010c';
   ctx.fillRect(0, 0, W, H);
-  if (!bgGrad) {
-    bgGrad = ctx.createLinearGradient(0, H * 0.5, 0, H);
-    bgGrad.addColorStop(0, 'rgba(120,20,160,0)');
-    bgGrad.addColorStop(1, 'rgba(120,20,160,0.32)');
-  }
-  ctx.fillStyle = bgGrad;
-  ctx.fillRect(0, H * 0.5, W, H * 0.5);
-  for (const s of stars) {
-    s.y += (8 + s.z * 34) * dt;
-    if (s.y > H) { s.y = 0; s.x = rand(0, W); }
-    ctx.globalAlpha = clamp(0.25 + s.z * 0.6 + Math.sin(time * 3 + s.x) * 0.15, 0, 1);
-    ctx.fillStyle = s.z > 0.85 ? '#9ff' : '#fff';
-    const sz = s.z > 0.7 ? 2 : 1;
-    ctx.fillRect(s.x, s.y, sz, sz);
+  for (const st of stars) {
+    st.y += (8 + st.z * 34) * dt;
+    if (st.y > H) { st.y = 0; st.x = rand(0, W); }
+    ctx.globalAlpha = clamp(0.25 + st.z * 0.6 + Math.sin(time * 3 + st.x) * 0.15, 0, 1);
+    ctx.fillStyle = st.z > 0.85 ? '#9ff' : '#fff';
+    const sz = st.z > 0.7 ? 2 : 1;
+    ctx.fillRect(st.x, st.y, sz, sz);
   }
   ctx.globalAlpha = 1;
-}
-
-function drawGrid() {
-  const hz = H * 0.72, vp = W / 2;
-  ctx.strokeStyle = 'rgba(255,43,214,.35)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let i = -14; i <= 14; i++) { ctx.moveTo(vp + i * 10, hz); ctx.lineTo(vp + i * W * 0.16, H); }
-  const off = reduceMotion ? 0 : (time * 0.5) % 1;
-  for (let i = 0; i < 10; i++) { const p = (i + off) / 10, y = hz + (H - hz) * p * p; ctx.moveTo(0, y); ctx.lineTo(W, y); }
-  ctx.stroke();
-  ctx.fillStyle = 'rgba(255,43,214,.7)';
-  ctx.fillRect(0, hz, W, 2);
+  drawSpace(dt);
 }
 
 function glowText(str, x, y, color, size, align = 'center') {
@@ -1065,6 +1360,13 @@ function drawWorld() {
 }
 
 function drawHUD() {
+  if (!hudGrad || hudGrad.h !== H) {
+    hudGrad = { h: H, top: ctx.createLinearGradient(0, 0, 0, 70), bot: ctx.createLinearGradient(0, H - 46, 0, H) };
+    hudGrad.top.addColorStop(0, 'rgba(4,1,12,.85)'); hudGrad.top.addColorStop(1, 'rgba(4,1,12,0)');
+    hudGrad.bot.addColorStop(0, 'rgba(4,1,12,.4)'); hudGrad.bot.addColorStop(1, 'rgba(4,1,12,.9)');
+  }
+  ctx.fillStyle = hudGrad.top; ctx.fillRect(0, 0, W, 70);
+  ctx.fillStyle = hudGrad.bot; ctx.fillRect(0, H - 46, W, 46);
   ctx.textBaseline = 'top';
   ctx.textAlign = 'left';
   ctx.font = '8px ' + FONT; ctx.fillStyle = '#8a86b5';
@@ -1089,9 +1391,13 @@ function drawHUD() {
   ctx.fillText('BEST', W / 2 + 24, 12);
   ctx.font = '14px ' + FONT; ctx.fillStyle = '#ffe600';
   ctx.fillText(pad(best), W / 2 + 24, 26);
+  ctx.font = '7px ' + FONT; ctx.fillStyle = 'rgba(0,229,255,.75)';
+  ctx.fillText(SECTORS[sectorIdx()].name, W / 2 + 24, 46);
 
   // Ground, lives, wave, power timers
   const gy = groundY();
+  ctx.fillStyle = 'rgba(57,255,20,.18)';
+  ctx.fillRect(0, gy - 3, W, 8);
   ctx.fillStyle = '#39ff14';
   ctx.fillRect(0, gy, W, 2);
   for (let i = 0; i < lives; i++) draw('ship', 12 + i * 28, gy + 12, '#39ff14', 2, false);
@@ -1115,9 +1421,10 @@ function drawBanner() {
   if (bannerT <= 0) return;
   ctx.globalAlpha = Math.min(1, bannerT * 3);
   ctx.textBaseline = 'middle';
-  const y = shieldY() - 70;
+  const y = shieldY() - 128;
   glowText('WAVE ' + level, W / 2, y, '#00e5ff', 22);
-  if (Math.floor(time * 4) % 2 === 0) glowText('GET READY', W / 2, y + 30, '#ffe600', 10);
+  glowText(SECTORS[sectorIdx()].name, W / 2, y + 30, '#ff2bd6', 12);
+  if (Math.floor(time * 4) % 2 === 0) glowText('GET READY', W / 2, y + 54, '#ffe600', 9);
   ctx.globalAlpha = 1;
 }
 
@@ -1178,7 +1485,7 @@ function drawHint() {
 
 function render(dt) {
   drawBackground(state === 'paused' ? 0 : dt);
-  if (state === 'menu' || state === 'scores' || !player) { drawGrid(); return; }
+  if (state === 'menu' || state === 'scores' || !player) return;
   ctx.save();
   if (shakeT > 0 && !reduceMotion) { const m = shakeT * 14; ctx.translate(rand(-m, m), rand(-m, m)); }
   drawWorld();
