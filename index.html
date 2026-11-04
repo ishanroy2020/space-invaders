@@ -535,16 +535,16 @@ function syncMusic() {
   if (want) music.start(); else music.stop();
 }
 
-// ---------- modern space backdrop: procedural pixel-art nebulae, planets and star glints ----------
+// ---------- modern space backdrop: slowly scrolling pixel-art nebulae and star glints ----------
 const SECTORS = [
-  { name: 'EARTH ORBIT',   planet: 'earth',   neb: [[30, 60, 170], [120, 40, 170]], key: 0 },
-  { name: 'THE MOON',      planet: 'moon',    neb: [[20, 90, 130], [70, 40, 140]],  key: 2 },
-  { name: 'MARS',          planet: 'mars',    neb: [[170, 60, 40], [110, 30, 100]], key: -3 },
-  { name: 'ASTEROID BELT', planet: null,      neb: [[110, 80, 60], [60, 40, 110]],  key: 5, rocks: true },
-  { name: 'JUPITER',       planet: 'jupiter', neb: [[200, 110, 50], [30, 120, 150]], key: 0 },
-  { name: 'SATURN',        planet: 'saturn',  neb: [[190, 150, 70], [90, 50, 150]], key: 2 },
-  { name: 'NEPTUNE',       planet: 'neptune', neb: [[30, 90, 200], [20, 160, 170]], key: -2 },
-  { name: 'DEEP NEBULA',   planet: null,      neb: [[230, 120, 60], [40, 150, 180]], key: 3, bright: true },
+  { name: 'EARTH ORBIT',   neb: [[30, 60, 170], [120, 40, 170]], key: 0 },
+  { name: 'THE MOON',      neb: [[20, 90, 130], [70, 40, 140]],  key: 2 },
+  { name: 'MARS',          neb: [[170, 60, 40], [110, 30, 100]], key: -3 },
+  { name: 'ASTEROID BELT', neb: [[110, 80, 60], [60, 40, 110]],  key: 5 },
+  { name: 'JUPITER',       neb: [[200, 110, 50], [30, 120, 150]], key: 0 },
+  { name: 'SATURN',        neb: [[190, 150, 70], [90, 50, 150]], key: 2 },
+  { name: 'NEPTUNE',       neb: [[30, 90, 200], [20, 160, 170]], key: -2 },
+  { name: 'DEEP NEBULA',   neb: [[230, 120, 60], [40, 150, 180]], key: 3, bright: true },
 ];
 const sectorIdx = () => (level - 1) % SECTORS.length;
 
@@ -575,111 +575,37 @@ function noiseGen(seed) {
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16);
 const newCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 
+// Nebula texture that tiles seamlessly top-to-bottom, so it can scroll forever
 function makeNebula(sec, seed) {
-  const cell = 4, w = Math.ceil(W * 1.1 / cell), h = Math.ceil(H * 1.06 / cell);
+  const cell = 4, w = Math.ceil(W * 1.1 / cell), h = Math.ceil(H / cell);
   const c = newCanvas(w, h), g = c.getContext('2d'), img = g.createImageData(w, h), d = img.data;
   const f = noiseGen(seed), [ca, cb] = sec.neb, k = sec.bright ? 1.1 : 0.85;
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+  const field = (x, y) => {
     const nx = x / 40, ny = y / 40;
     const warp = f(nx * 0.7 + 10, ny * 0.7 + 3, 3);
     let v = clamp((f(nx + warp * 1.8, ny + warp * 1.8, 5) - 0.42) / 0.38, 0, 1);
     v *= 1 - clamp((f(nx * 2.2 + 40, ny * 2.2, 3) - 0.55) * 3, 0, 1) * 0.8;   // dark dust lanes
-    const lv = Math.floor(v * 5 + BAYER[(y & 3) * 4 + (x & 3)] - 0.5) / 5;    // dithered to 5 levels
-    if (lv <= 0) continue;
-    // Sharpen the colour mix so the two hues stay vivid instead of averaging to grey
-    const m = clamp((f(nx * 0.5 + 77, ny * 0.5 + 9, 3) - 0.38) / 0.24, 0, 1), br = 0.55 + lv * 0.9, i = (y * w + x) * 4;
-    const hot = lv >= 0.8 ? 0.3 : 0;                                         // bright cores glow toward white
-    for (let ch = 0; ch < 3; ch++) d[i + ch] = ((ca[ch] + (cb[ch] - ca[ch]) * m) * br) * (1 - hot) + 255 * hot;
-    d[i + 3] = Math.min(255, lv * k * 150);
-  }
-  g.putImageData(img, 0, 0);
-  return c;
-}
-
-function surface(type, lon, lat, f) {
-  if (type === 'earth') {
-    let col = f(lon * 1.3 + 3, lat * 1.6 + 1, 5) > 0.53 ? (f(lon * 3 + 9, lat * 3, 3) > 0.5 ? [80, 140, 70] : [160, 140, 90]) : [30, 80, 185];
-    if (Math.abs(lat) > 1.22) col = [235, 240, 250];
-    if (f(lon * 2.2 + 20, lat * 3 + 5, 4) > 0.58) col = [240, 245, 255];
-    return col;
-  }
-  if (type === 'moon') {
-    const cr = f(lon * 5 + 30, lat * 5, 3);
-    let col = f(lon * 1.5, lat * 1.5, 4) < 0.42 ? [115, 115, 125] : [175, 175, 180];
-    if (cr > 0.66) col = [135, 135, 145];
-    if (cr > 0.72) col = [205, 205, 210];
-    return col;
-  }
-  if (type === 'mars') {
-    const n = f(lon * 1.6, lat * 1.6, 5);
-    if (lat < -1.25) return [240, 235, 235];
-    return n > 0.56 ? [130, 55, 40] : n < 0.4 ? [210, 110, 70] : [185, 85, 50];
-  }
-  if (type === 'jupiter') {
-    const sx = (lon - 0.5) / 0.32, sy = (lat - 0.38) / 0.16;
-    if (sx * sx + sy * sy < 1) return [195, 85, 60];
-    const b = Math.sin(lat * 10 + f(lon * 2, lat * 6, 3) * 2.2);
-    return b > 0.4 ? [230, 205, 170] : b > -0.3 ? [200, 150, 105] : [150, 100, 70];
-  }
-  if (type === 'saturn') return Math.sin(lat * 8 + f(lon * 2, lat * 5, 2) * 1.5) > 0 ? [225, 200, 150] : [195, 165, 115];
-  // neptune
-  const sx = (lon + 0.3) / 0.25, sy = (lat - 0.3) / 0.12;
-  if (sx * sx + sy * sy < 1) return [25, 45, 120];
-  return Math.sin(lat * 7 + f(lon * 2, lat * 4, 3) * 2) > 0.5 ? [90, 140, 235] : [45, 85, 200];
-}
-
-// Lit, dithered pixel sphere (cell = 3 logical px), with atmosphere glow and Saturn's rings
-function makePlanet(type, r, seed) {
-  const R = r / 3, atm = Math.max(2, Math.round(R * 0.08)), ringW = type === 'saturn' ? 2.3 : 1;
-  const cw = Math.ceil(R * 2 * ringW + atm * 2 + 2), ch = Math.ceil(R * 2 + atm * 2 + 2);
-  const c = newCanvas(cw, ch), g = c.getContext('2d'), img = g.createImageData(cw, ch), d = img.data;
-  const cx = cw / 2, cy = ch / 2, f = noiseGen(seed), L = [-0.55, -0.45, 0.7];
-  const atmCol = type === 'mars' ? [255, 150, 110] : (type === 'jupiter' || type === 'saturn') ? [255, 220, 170] : [110, 190, 255];
-  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
-    const dx = (x + 0.5 - cx) / R, dy = (y + 0.5 - cy) / R, d2 = dx * dx + dy * dy;
-    const bay = BAYER[(y & 3) * 4 + (x & 3)];
-    let col = null, alpha = 255;
-    if (d2 <= 1) {
-      const nz = Math.sqrt(1 - d2);
-      const light = dx * L[0] + dy * L[1] + nz * L[2];
-      const shade = Math.floor(clamp(light * 1.15 + 0.1, 0, 1) * 5 + bay - 0.4) / 5;
-      const s = 0.06 + Math.max(0, shade) * 0.98;
-      const base = surface(type, Math.atan2(dx, nz), Math.asin(clamp(dy, -1, 1)), f);
-      col = [base[0] * s, base[1] * s, base[2] * s];
-    } else if (type !== 'moon' && d2 < Math.pow(1 + atm / R, 2)) {
-      const t = 1 - (Math.sqrt(d2) - 1) / (atm / R);
-      const a = t * clamp(0.25 + (-dx * 0.55 - dy * 0.45), 0, 1);
-      if (a > 0.05) { col = atmCol; alpha = Math.round(a * 220); }
+    return [v, f(nx * 0.5 + 77, ny * 0.5 + 9, 3)];
+  };
+  for (let y = 0; y < h; y++) {
+    const t = y / h;                                   // blend with the copy one tile up -> seamless wrap
+    for (let x = 0; x < w; x++) {
+      const A = field(x, y), B = field(x, y - h);
+      const v = A[0] * (1 - t) + B[0] * t, mRaw = A[1] * (1 - t) + B[1] * t;
+      const lv = Math.floor(v * 5 + BAYER[(y & 3) * 4 + (x & 3)] - 0.5) / 5;
+      if (lv <= 0) continue;
+      // Sharpen the colour mix so the two hues stay vivid instead of averaging to grey
+      const m = clamp((mRaw - 0.38) / 0.24, 0, 1), br = 0.55 + lv * 0.9, i = (y * w + x) * 4;
+      const hot = lv >= 0.8 ? 0.3 : 0;
+      for (let ch = 0; ch < 3; ch++) d[i + ch] = ((ca[ch] + (cb[ch] - ca[ch]) * m) * br) * (1 - hot) + 255 * hot;
+      d[i + 3] = Math.min(255, lv * k * 150);
     }
-    if (type === 'saturn') {
-      const rr = Math.sqrt(dx * dx + Math.pow(dy / 0.26, 2));
-      if (rr > 1.3 && rr < 2.15 && !(rr > 1.72 && rr < 1.78) && (d2 > 1 || dy > 0)) {
-        const band = Math.sin(rr * 22) * 0.5 + 0.5, lr = clamp(0.55 - dx * 0.3, 0.3, 1) * (0.75 + band * 0.25);
-        col = [210 * lr, 185 * lr, 140 * lr]; alpha = 235;
-      }
-    }
-    if (!col) continue;
-    const i = (y * cw + x) * 4;
-    d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = alpha;
   }
   g.putImageData(img, 0, 0);
   return c;
 }
 
-function makeRock(seed, size) {
-  const c = newCanvas(size, size), g = c.getContext('2d'), img = g.createImageData(size, size), d = img.data;
-  const f = noiseGen(seed), h = size / 2;
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    const dx = (x + 0.5 - h) / h, dy = (y + 0.5 - h) / h;
-    if (Math.sqrt(dx * dx + dy * dy) > 0.65 + f(x * 0.5, y * 0.5, 2) * 0.45) continue;
-    const s = clamp(0.55 - dx * 0.35 - dy * 0.35, 0.15, 1), i = (y * size + x) * 4;
-    d[i] = 140 * s; d[i + 1] = 118 * s; d[i + 2] = 100 * s; d[i + 3] = 255;
-  }
-  g.putImageData(img, 0, 0);
-  return c;
-}
-
-let backdrop = null, meteors = [];
+let backdrop = null, meteors = [], scrollY = 0;
 function ensureBackdrop() {
   const menu = state === 'menu' || state === 'scores' || !player;
   const idx = menu ? -1 : sectorIdx();
@@ -687,16 +613,8 @@ function ensureBackdrop() {
   if (backdrop && backdrop.key === key) return backdrop;
   const sec = menu ? { neb: [[40, 50, 160], [140, 40, 160]] } : SECTORS[idx];
   const seed = 1234 + (idx + 1) * 977, r = rng(seed + 5);
-  const b = { key, menu, neb: makeNebula(sec, seed), spikes: [], rocks: [], planet: null };
-  for (let i = 0; i < 6; i++) b.spikes.push({ x: r() * W, y: r() * H * 0.8, s: 5 + r() * 9, c: ['#ffffff', '#ffe9c4', '#cfe6ff'][i % 3], p: r() * 6 });
-  if (menu) {
-    const R = W * 0.8;
-    b.planet = { c: makePlanet('earth', R, 42), x: W / 2, y: H + R * 0.62, R };
-  } else if (sec.planet) {
-    const R = Math.min(W, H) * (sec.planet === 'saturn' ? 0.15 : 0.19);
-    b.planet = { c: makePlanet(sec.planet, R, seed), x: W * (r() < 0.5 ? 0.16 : 0.84), y: H * 0.46, R };
-  }
-  if (sec.rocks) for (let i = 0; i < 9; i++) b.rocks.push({ c: makeRock(seed + i * 31, 5 + Math.floor(r() * 7)), x: r() * W, y: r() * H, v: 6 + r() * 14 });
+  const b = { key, menu, neb: makeNebula(sec, seed), spikes: [] };
+  for (let i = 0; i < 6; i++) b.spikes.push({ x: r() * W, y: r() * H, s: 5 + r() * 9, c: ['#ffffff', '#ffe9c4', '#cfe6ff'][i % 3], p: r() * 6 });
   backdrop = b;
   return b;
 }
@@ -716,46 +634,21 @@ function spikeStar(x, y, s, color, a) {
   ctx.globalAlpha = 1;
 }
 
+// Slow, endless forward travel: the nebula scrolls gently and wraps seamlessly
+const NEBULA_SPEED = 7, GLINT_SPEED = 11;   // logical px per second
 function drawSpace(dt) {
   const bd = ensureBackdrop();
-  const par = !bd.menu && player ? (player.x + SHIP_W / 2 - W / 2) * -0.03 : Math.sin(time * 0.15) * 6;
-  ctx.drawImage(bd.neb, -W * 0.05 + par, -H * 0.03, W * 1.1, H * 1.06);
-  for (const st of bd.spikes) spikeStar(st.x + par * 0.5, st.y, st.s * (0.85 + Math.sin(time * 2 + st.p) * 0.15), st.c, 0.75);
-  for (const rk of bd.rocks) {
-    rk.y += rk.v * dt;
-    if (rk.y > H + 40) { rk.y = -40; rk.x = rand(0, W); }
-    ctx.globalAlpha = 0.8;
-    ctx.drawImage(rk.c, rk.x + par * 1.5, rk.y, rk.c.width * 3, rk.c.height * 3);
-    ctx.globalAlpha = 1;
+  const par = !bd.menu && player ? (player.x + SHIP_W / 2 - W / 2) * -0.02 : 0;
+  if (!reduceMotion) scrollY = (scrollY + NEBULA_SPEED * dt) % H;
+  const nx = -W * 0.05 + par, nw = W * 1.1;
+  ctx.drawImage(bd.neb, nx, scrollY - H, nw, H);
+  ctx.drawImage(bd.neb, nx, scrollY, nw, H);
+  for (const st of bd.spikes) {
+    if (!reduceMotion) { st.y += GLINT_SPEED * dt; if (st.y > H + 20) { st.y = -20; st.x = rand(0, W); } }
+    spikeStar(st.x + par * 0.5, st.y, st.s * (0.85 + Math.sin(time * 2 + st.p) * 0.15), st.c, 0.75);
   }
-  const p = bd.planet;
-  if (p) {
-    const drift = bd.menu ? 0 : Math.min(60, waveT * 1.2);
-    const w = p.c.width * 3, h = p.c.height * 3;
-    ctx.globalAlpha = bd.menu ? 1 : 0.85;
-    ctx.drawImage(p.c, p.x - w / 2 + par * 1.6, p.y - h / 2 + drift, w, h);
-    ctx.globalAlpha = 1;
-    if (bd.menu) {
-      // Sunrise over Earth's limb
-      const sx = p.x - p.R * 0.5, sy = p.y - p.R * 0.865;
-      ctx.globalCompositeOperation = 'lighter';
-      const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, 90);
-      glow.addColorStop(0, 'rgba(255,255,255,.95)');
-      glow.addColorStop(0.15, 'rgba(255,220,160,.55)');
-      glow.addColorStop(1, 'rgba(255,140,60,0)');
-      ctx.fillStyle = glow;
-      ctx.fillRect(sx - 90, sy - 90, 180, 180);
-      const streak = ctx.createLinearGradient(sx - 220, 0, sx + 220, 0);
-      streak.addColorStop(0, 'rgba(255,200,140,0)');
-      streak.addColorStop(0.5, 'rgba(255,230,200,.7)');
-      streak.addColorStop(1, 'rgba(255,200,140,0)');
-      ctx.fillStyle = streak;
-      ctx.fillRect(sx - 220, sy - 1, 440, 2);
-      ctx.globalCompositeOperation = 'source-over';
-    }
-  }
-  // Shooting stars
-  if (Math.random() < dt / 3.5) {
+  // Occasional shooting star
+  if (!reduceMotion && Math.random() < dt / 5) {
     const dir = Math.random() < 0.5 ? -1 : 1;
     meteors.push({ x: rand(0, W), y: rand(0, H * 0.5), vx: dir * rand(160, 280), vy: rand(80, 160), life: 0.8 });
   }
@@ -1265,7 +1158,7 @@ function drawBackground(dt) {
   ctx.fillStyle = '#04010c';
   ctx.fillRect(0, 0, W, H);
   for (const st of stars) {
-    st.y += (8 + st.z * 34) * dt;
+    st.y += (5 + st.z * 26) * dt;
     if (st.y > H) { st.y = 0; st.x = rand(0, W); }
     ctx.globalAlpha = clamp(0.25 + st.z * 0.6 + Math.sin(time * 3 + st.x) * 0.15, 0, 1);
     ctx.fillStyle = st.z > 0.85 ? '#9ff' : '#fff';
